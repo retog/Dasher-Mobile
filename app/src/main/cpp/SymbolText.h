@@ -19,12 +19,14 @@
 namespace DasherAndroid {
 
 /**
- * @brief Prepares a plain-text training corpus: each run of spaces and line breaks becomes
- *        one "□".
+ * @brief Prepares a plain-text training corpus: each run of spaces and tabs becomes one "□",
+ *        and each run of line breaks starts a new text.
  *
- * Line breaks in the bundled corpora end paragraphs of prose.  Learning them as "¶" would make
- * Enter one of the largest boxes after every sentence, and in the keyboard Enter can trigger
- * the editor's send or search action, so "¶" is learned only from the user's own text.
+ * Every line of the bundled corpora is a paragraph.  A line break becomes DasherCore's
+ * context-switch escape, the same marker it writes before each new text in the user training
+ * file, so paragraph starts are learned in the default context every text starts in.  Line
+ * breaks are not learned as "¶": that would make Enter one of the largest boxes after every
+ * sentence, so "¶" is learned only from the user's own text.
  */
 std::string CorpusToSymbolText(const std::string &corpus);
 
