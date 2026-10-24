@@ -373,13 +373,24 @@ class DasherEngine(
     }
 
     /**
-     * Clears the native output-text buffer.
+     * Clears the native output-text buffer and restarts prediction from an empty context.
      *
      * Should be called when the host wants to start a new "word" or text session.
      */
     fun resetOutputText() {
         if (destroyed || nativeHandle == 0L) return
         NativeBridge.nativeResetOutputText(nativeHandle)
+    }
+
+    /**
+     * Saves text written since the last flush to the user training file.
+     *
+     * Destroying the engine flushes as well; call this when the host pauses so learned text
+     * survives the process being killed.
+     */
+    fun flushTrainingText() {
+        if (destroyed || nativeHandle == 0L) return
+        NativeBridge.nativeFlushTrainingText(nativeHandle)
     }
 
     /**

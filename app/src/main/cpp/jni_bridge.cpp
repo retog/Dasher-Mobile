@@ -538,4 +538,16 @@ Java_com_janmurin_dashermobile_NativeBridge_nativeResetOutputText(JNIEnv *,
     session->iface->ResetOutputText();
 }
 
+/** @brief JNI binding for @c NativeBridge.nativeFlushTrainingText. Saves learned text to the user training file. */
+JNIEXPORT void JNICALL
+Java_com_janmurin_dashermobile_NativeBridge_nativeFlushTrainingText(JNIEnv *,
+                                                                      jclass,
+                                                                      jlong handle) {
+    auto *session = fromHandle(handle);
+    if (!session || !session->iface) {
+        return;
+    }
+    session->iface->FlushTrainingText();
+}
+
 }

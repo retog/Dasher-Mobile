@@ -178,9 +178,19 @@ public:
     std::string GetOutputText() const;
 
     /**
-     * @brief Clears the internal edit buffer.
+     * @brief Starts a new text: saves learned text, clears the edit buffer and rebuilds the
+     *        Dasher model with an empty context.
      */
     void ResetOutputText();
+
+    /**
+     * @brief Appends text written since the last flush to the user training file.
+     *
+     * DasherCore only does this on its own when the writing context jumps or the alphabet
+     * changes, so hosts call it when they pause; it also runs before a language-model switch
+     * and on destruction.  No-op until the engine is realised.
+     */
+    void FlushTrainingText();
 
 protected:
     /** @brief Registers the @c AndroidPointerInput module with DasherCore. */

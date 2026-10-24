@@ -1,5 +1,6 @@
 package com.janmurin.dashermobile
 
+import android.content.ComponentCallbacks2
 import android.content.Context
 import android.inputmethodservice.InputMethodService
 import android.util.Log
@@ -19,7 +20,9 @@ import com.janmurin.dashermobile.ui.DasherHostViews
  * ```
  * onCreateInputView  → registers with DasherSessionCoordinator, wires callbacks
  * onStartInputView   → activates the host, resets text buffer, starts frame loop
- * onFinishInputView  → pauses + deactivates + discards native runtime
+ * onFinishInputView  → resets text buffer, pauses + deactivates (engine and what its
+ *                      language model learned are kept; learned text is saved)
+ * onTrimMemory       → discards the native runtime while hidden and memory is low
  * onDestroy          → unregisters host, releases tilt sensor
  * ```
  *
@@ -189,10 +192,20 @@ class DasherImeService : InputMethodService() {
         hostHandle?.let {
             DasherSessionCoordinator.clearTiltInput(it)
             DasherSessionCoordinator.requestPause(it)
+            // The engine outlives this editor: empty both the engine text and the sink's copy
+            // so activating for the next editor never replays or deletes this editor's text.
+            DasherSessionCoordinator.resetOutputText(it)
             DasherSessionCoordinator.deactivateHost(it)
-            DasherSessionCoordinator.discardHostRuntime(it)
         }
+        imeTextSink?.resetTracking()
         super.onFinishInputView(finishingInput)
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (!isInputViewActive && level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) {
+            hostHandle?.let { DasherSessionCoordinator.discardHostRuntime(it) }
+        }
     }
 
     override fun onDestroy() {

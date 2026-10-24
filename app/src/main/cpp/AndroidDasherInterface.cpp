@@ -368,7 +368,9 @@ AndroidDasherInterface::AndroidDasherInterface(const std::string &filesDir)
                         GetStringParameter(Dasher::SP_INPUT_FILTER).c_str());
 }
 
-AndroidDasherInterface::~AndroidDasherInterface() = default;
+AndroidDasherInterface::~AndroidDasherInterface() {
+    FlushTrainingText();
+}
 
 void AndroidDasherInterface::CallNewFrame(unsigned long timeMs, bool forceRedraw) {
     NewFrame(timeMs, forceRedraw);
@@ -483,6 +485,8 @@ void AndroidDasherInterface::SetLanguageModelId(int modelId) {
         KeyDown(nowMs(), Dasher::Keys::Primary_Input);
         m_startedByTouch = false;
     }
+    // The switch recreates the alphabet manager, dropping its unsaved training buffer.
+    FlushTrainingText();
     SetLongParameter(Dasher::LP_LANGUAGE_MODEL_ID, static_cast<long>(resolved));
 }
 
@@ -542,6 +546,16 @@ std::string AndroidDasherInterface::GetOutputText() const {
 }
 
 void AndroidDasherInterface::ResetOutputText() {
+    FlushTrainingText();
     m_editBuffer.clear();
+    if (m_realized) {
+        SetBuffer(0);
+    }
+}
+
+void AndroidDasherInterface::FlushTrainingText() {
+    if (m_realized) {
+        WriteTrainFileFull();
+    }
 }
 

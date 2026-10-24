@@ -12,9 +12,9 @@ import android.content.res.AssetManager
  * 2. Before interacting with the engine the host calls [activateHost], which wires the engine's
  *    callbacks to that host and starts the frame loop.
  * 3. While active, the host delivers surface-size and input events via the coordinator.
- * 4. On pause the host calls [deactivateHost] to stop the frame loop and
- *    [discardHostRuntime] to tear down the native session entirely (important for the IME
- *    which must not consume resources when not visible).
+ * 4. On pause the host calls [deactivateHost] to stop the frame loop and save learned text.
+ *    The native session is kept, so what the language model learned stays in memory;
+ *    [discardHostRuntime] tears it down entirely (the IME does this under memory pressure).
  * 5. On final teardown the host calls [unregisterHost].
  *
  * All public methods are **thread-safe** (synchronized on an internal lock).
@@ -160,8 +160,8 @@ object DasherSessionCoordinator {
     }
 
     /**
-     * Pauses and stops the engine without destroying native resources, and clears the active
-     * host reference.
+     * Pauses and stops the engine without destroying native resources, saves learned text to
+     * the user training file, and clears the active host reference.
      *
      * @param host The [HostHandle] to deactivate.  No-op if [host] is not currently active.
      */
@@ -171,16 +171,18 @@ object DasherSessionCoordinator {
             val localEngine = engine ?: return
             localEngine.requestPause()
             localEngine.stop()
+            localEngine.flushTrainingText()
             activeHostId = null
         }
     }
 
     /**
-     * Stops and destroys the native engine associated with [host].
+     * Stops and destroys the native engine associated with [host].  Learned text is saved
+     * first.
      *
      * After this call the engine is gone but the host registration remains.  A subsequent call
-     * to [activateHost] will recreate the engine.  This is the recommended pattern for the IME
-     * which must release all resources when the keyboard is hidden.
+     * to [activateHost] will recreate the engine, retraining the language model.  The IME uses
+     * this to release memory while the keyboard is hidden and the system is short of memory.
      *
      * @param host The [HostHandle] whose runtime should be discarded.
      */

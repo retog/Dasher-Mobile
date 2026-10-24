@@ -105,11 +105,20 @@ class NativeBridge {
         @JvmStatic external fun nativeGetOutputText(handle: Long): String
 
         /**
-         * Clears the output-text buffer inside the native session.
+         * Starts a new text inside the native session: saves learned text, clears the
+         * output-text buffer and rebuilds the Dasher model with an empty context.
          *
          * @param handle Opaque session handle.
          */
         @JvmStatic external fun nativeResetOutputText(handle: Long)
+
+        /**
+         * Appends text written since the last flush to the user training file, so the
+         * language model keeps what it learned across sessions.
+         *
+         * @param handle Opaque session handle.
+         */
+        @JvmStatic external fun nativeFlushTrainingText(handle: Long)
 
         /**
          * Returns the identifier of the currently active Dasher alphabet
