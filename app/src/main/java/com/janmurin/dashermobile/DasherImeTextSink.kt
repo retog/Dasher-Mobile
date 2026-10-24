@@ -13,15 +13,17 @@ import android.view.inputmethod.InputConnection
  * bring the target field in sync.  This preserves the host app's undo history and is
  * significantly cheaper than re-inserting the full string each frame.
  *
- * ## IME action handling
- * When a newline character is output, [DasherImeTextSink] inspects the [EditorInfo] to decide
- * whether to commit a literal `\n` or to fire the editor's IME action (e.g. "Go", "Search",
- * "Send").
+ * ## Newlines
+ * A newline is committed only in multi-line editors and dropped in single-line ones.  It never
+ * fires the editor's IME action ("Go", "Search", "Send"): Dasher outputs a symbol as soon as the
+ * user steers into its box, so a brush with the ¶ box would send a half-written message.
+ * Dropped newlines are left out when counting what to delete, so reversing over one never
+ * deletes a character of the editor's text.
  *
  * @param inputConnectionProvider Lazy getter for the current [InputConnection].  May return
  *   `null` if the connection is no longer valid.
- * @param editorInfoProvider       Lazy getter for the current [EditorInfo].  Used to determine
- *   the correct behaviour for newline/enter output.
+ * @param editorInfoProvider       Lazy getter for the current [EditorInfo].  Used to tell
+ *   whether the editor takes newlines.
  */
 class DasherImeTextSink(
     private val inputConnectionProvider: () -> InputConnection?,
@@ -55,7 +57,7 @@ class DasherImeTextSink(
 
         val inputConnection = inputConnectionProvider() ?: return
         val commonPrefixLength = commonPrefixLength(lastText, text)
-        val deleteCount = lastText.length - commonPrefixLength
+        val deleteCount = committedLength(lastText.substring(commonPrefixLength))
         val insertedText = text.substring(commonPrefixLength)
 
         inputConnection.beginBatchEdit()
@@ -87,7 +89,9 @@ class DasherImeTextSink(
                 }
                 '\n' -> {
                     flushChunk()
-                    performEnterOrAction(inputConnection)
+                    if (isMultiline()) {
+                        inputConnection.commitText("\n", 1)
+                    }
                 }
                 else -> chunk.append(ch)
             }
@@ -96,20 +100,15 @@ class DasherImeTextSink(
         flushChunk()
     }
 
-    private fun performEnterOrAction(inputConnection: InputConnection) {
-        val editorInfo = editorInfoProvider()
-        val imeOptions = editorInfo?.imeOptions ?: EditorInfo.IME_ACTION_NONE
-        val action = imeOptions and EditorInfo.IME_MASK_ACTION
-        val noEnterAction = imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION != 0
-        val inputType = editorInfo?.inputType ?: 0
-        val isMultiline = inputType and (InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_IME_MULTI_LINE) != 0
-
-        if (!noEnterAction && !isMultiline && action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED) {
-            inputConnection.performEditorAction(action)
-        } else {
-            inputConnection.commitText("\n", 1)
-        }
+    /** Returns `true` if the current editor takes newlines. */
+    private fun isMultiline(): Boolean {
+        val inputType = editorInfoProvider()?.inputType ?: 0
+        return inputType and (InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_IME_MULTI_LINE) != 0
     }
+
+    /** Returns how many characters of [text] were committed, i.e. without dropped newlines. */
+    private fun committedLength(text: String): Int =
+        if (isMultiline()) text.length else text.count { it != '\n' }
 
     private fun commonPrefixLength(left: String, right: String): Int {
         val max = minOf(left.length, right.length)
