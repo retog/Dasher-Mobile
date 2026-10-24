@@ -84,16 +84,20 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # -Pnightly signs the APK with the public test certificate (keystore/README.md).
       - name: Build release APK
-        run: ./gradlew --no-daemon assembleRelease
+        run: ./gradlew --no-daemon assembleRelease -Pnightly
 
+      # Job outputs reach the scripts through env, never interpolated into them: a
+      # release tag is outside data and may contain shell metacharacters.
       - name: Rename APK
         id: apk
+        env:
+          TAG: ${{ needs.check.outputs.tag }}
         run: |
           set -euo pipefail
-          tag="${{ needs.check.outputs.tag }}"
           src=$(find app/build/outputs/apk/release -name '*.apk' | head -n1)
-          out="dasher-mobile-${tag}.apk"
+          out="dasher-mobile-${TAG}.apk"
           cp "$src" "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"
 
@@ -107,17 +111,18 @@ jobs:
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.check.outputs.tag }}
+          PREVIOUS_TAG: ${{ needs.check.outputs.previous_tag }}
+          APK: ${{ steps.apk.outputs.path }}
         run: |
           set -euo pipefail
-          tag="${{ needs.check.outputs.tag }}"
-          previous="${{ needs.check.outputs.previous_tag }}"
           notes="Automated nightly build of Dasher Mobile at ${GITHUB_SHA}."
-          if [ -n "$previous" ]; then
-            notes="${notes}"$'\n\n'"Changes since ${previous}: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${previous}...${GITHUB_SHA}"
+          if [ -n "$PREVIOUS_TAG" ]; then
+            notes="${notes}"$'\n\n'"Changes since ${PREVIOUS_TAG}: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${PREVIOUS_TAG}...${GITHUB_SHA}"
           fi
-          gh release create "$tag" \
+          gh release create "$TAG" \
             --target "$GITHUB_SHA" \
-            --title "$tag" \
+            --title "$TAG" \
             --notes "$notes" \
             --prerelease \
-            "${{ steps.apk.outputs.path }}"
+            "$APK"

@@ -35,7 +35,8 @@ The architecture diagram is available in [`docs/architecture.puml`](docs/archite
 3. Build:
    ```bash
    ./gradlew assembleDebug      # debug APK
-   ./gradlew assembleRelease    # release APK, signed with the public test key (see keystore/README.md)
+   ./gradlew assembleRelease    # release APK (update signing config first)
+   ./gradlew assembleRelease -Pnightly   # release APK signed with the public test key, as the nightly builds are
    ```
 
 CMake compiles the native libraries (`DasherCore`, `KenLM`) automatically as part of the Gradle build.

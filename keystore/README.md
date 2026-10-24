@@ -1,9 +1,10 @@
 # Nightly test signing key
 
-`nightly-test.jks` is a self-signed, **non-secret** test certificate used to
-sign release APKs, in particular the nightly builds (see
-`.github/workflows/nightly.yml`), so that each nightly build has a consistent
-signature and can be installed over the previous one without uninstalling.
+`nightly-test.jks` is a self-signed, **non-secret** test certificate used only
+to sign the nightly APK builds (see `.github/workflows/nightly.yml`), so that
+each nightly build has a consistent signature and can be installed over the
+previous one without uninstalling. Gradle applies it to a release build only
+when asked to with `-Pnightly`.
 
 It is **not** a production signing key. Its password is intentionally checked
 in alongside it in `nightly-test.properties` — treat both files as public.

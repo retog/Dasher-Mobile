@@ -6,9 +6,10 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-// Release builds are signed with a checked-in, non-secret test certificate
-// (see keystore/README.md) so consecutive nightly APKs share a signature and
-// can be installed over one another. This is not a production signing key.
+// Nightly builds (-Pnightly) are signed with a checked-in, non-secret test
+// certificate (see keystore/README.md) so consecutive nightly APKs share a
+// signature and can be installed over one another. This is not a production
+// signing key, so other release builds stay unsigned.
 val nightlyKeystoreProperties = Properties().apply {
     file("../keystore/nightly-test.properties").inputStream().use { load(it) }
 }
@@ -59,7 +60,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("nightly")
+            if (project.hasProperty("nightly")) {
+                signingConfig = signingConfigs.getByName("nightly")
+            }
         }
     }
     compileOptions {
