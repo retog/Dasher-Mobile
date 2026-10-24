@@ -128,7 +128,7 @@ class MainActivity : ComponentActivity() {
             DasherSessionCoordinator.updateHostCallbacks(
                 host = localHost,
                 frameConsumer = { commands, strings -> canvasView.submitFrame(commands, strings) },
-                textConsumer = { text -> textView.text = text.replace('\u25a1', ' ') },
+                textConsumer = { text -> textView.text = text },
                 statusConsumer = { mode, paused ->
                     val modeLabel = if (mode == InputMode.TILT) "TILT" else "TOUCH"
                     val stateLabel = if (paused) "PAUSED" else "RUNNING"

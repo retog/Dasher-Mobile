@@ -27,6 +27,7 @@ target_link_libraries(DasherCore kenlm_query)
 add_library(dasher_jni SHARED
     AndroidFileUtils.cpp
     AndroidDasherInterface.cpp
+    SymbolText.cpp
     jni_bridge.cpp
 )
 

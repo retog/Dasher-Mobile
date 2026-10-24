@@ -171,8 +171,9 @@ public:
     ///@}
 
     /**
-     * @brief Returns the full accumulated output text.
-     * @return The contents of the internal edit buffer.
+     * @brief Returns the full accumulated output text as plain text.
+     * @return The internal edit buffer with the alphabet's "□" / "¶" symbols turned into
+     *         a space / newline (see SymbolText.h).
      */
     std::string GetOutputText() const;
 

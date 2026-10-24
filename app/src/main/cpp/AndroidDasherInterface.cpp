@@ -13,6 +13,7 @@
  */
 
 #include "AndroidDasherInterface.h"
+#include "SymbolText.h"
 
 #include "DasherCore/DasherInput.h"
 #include "DasherCore/DasherScreen.h"
@@ -537,7 +538,7 @@ int AndroidDasherInterface::GetAllContextLenght() {
 }
 
 std::string AndroidDasherInterface::GetOutputText() const {
-    return m_editBuffer;
+    return DasherAndroid::ToPlainText(m_editBuffer);
 }
 
 void AndroidDasherInterface::ResetOutputText() {
