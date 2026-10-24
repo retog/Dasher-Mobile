@@ -35,7 +35,13 @@ The architecture diagram is available in [`docs/architecture.puml`](docs/archite
 3. Build:
    ```bash
    ./gradlew assembleDebug      # debug APK
-   ./gradlew assembleRelease    # release APK (update signing config first)
+   ./gradlew assembleRelease    # release APK, signed with the public test key (see keystore/README.md)
    ```
 
 CMake compiles the native libraries (`DasherCore`, `KenLM`) automatically as part of the Gradle build.
+
+## Nightly builds
+
+`.github/workflows/nightly.yml` builds a release APK every night at 02:30 UTC if `master` changed since the previous nightly release, and publishes it as a pre-release tagged `nightly-YYYY-MM-DD`. Runs started by hand (Actions → Nightly APK build → Run workflow) are tagged `nightly-YYYY-MM-DD-X1`, `-X2`, … for that day.
+
+Nightly APKs are signed with the public test key in `keystore/`, so each installs over the previous one. To install one over a build signed with a different key, uninstall that build first.
