@@ -50,7 +50,7 @@ std::string ToSymbolText(const std::string &plain) {
             out += kNewlineSymbol;
         } else if (c == '\r') {
             if (i + 1 < plain.size() && plain[i + 1] == '\n') ++i;
-            out += kNewlineSymbol;
+            out += c;
         } else {
             out += c;
         }

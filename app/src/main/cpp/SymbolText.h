@@ -36,8 +36,11 @@ std::string CorpusToSymbolText(const std::string &corpus);
 std::string ToPlainText(const std::string &symbolText);
 
 /**
- * @brief Converts plain text from an editor to alphabet symbol text: ' ' → "□", and each line
- *        break ("\r\n", "\n" or a lone "\r") → "¶".  The inverse of @ref ToPlainText.
+ * @brief Converts plain text from an editor to alphabet symbol text: ' ' → "□", '\n' → "¶".
+ *
+ * A carriage return is kept as one "\r", taking the '\n' of a "\r\n" with it.  No alphabet has
+ * it, so text loaded from an editor restarts after such a line break, and reversing never
+ * deletes half of a "\r\n".  Otherwise the inverse of @ref ToPlainText.
  */
 std::string ToSymbolText(const std::string &plain);
 
