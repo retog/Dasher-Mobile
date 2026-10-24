@@ -35,11 +35,17 @@ class DasherImeTextSink(
      * Resets the internal "last known text" snapshot.
      *
      * Should be called whenever the IME attaches to a new editor field so that the next
-     * [onTextChanged] call computes its diff against an empty baseline.
+     * [onTextChanged] call computes its diff against [baseline].
+     *
+     * @param baseline Text already before the cursor that the engine was loaded with.
      */
-    fun resetTracking() {
-        lastText = ""
+    fun resetTracking(baseline: String = "") {
+        lastText = baseline
     }
+
+    /** The output text the editor is believed to hold before its cursor. */
+    val trackedText: String
+        get() = lastText
 
     /**
      * Called each time DasherCore's output buffer changes.

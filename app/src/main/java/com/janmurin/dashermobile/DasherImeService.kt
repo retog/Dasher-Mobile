@@ -3,6 +3,8 @@ package com.janmurin.dashermobile
 import android.content.ComponentCallbacks2
 import android.content.Context
 import android.inputmethodservice.InputMethodService
+import android.os.Handler
+import android.os.Looper
 import android.text.InputType
 import android.util.Log
 import android.view.View
@@ -20,8 +22,9 @@ import com.janmurin.dashermobile.ui.DasherHostViews
  * ## Lifecycle overview
  * ```
  * onCreateInputView  → registers with DasherSessionCoordinator, wires callbacks
- * onStartInputView   → activates the host, resets text buffer, turns learning off for
- *                      password fields, starts frame loop
+ * onStartInputView   → activates the host, turns learning off for password fields, loads
+ *                      the text before the cursor, starts frame loop
+ * onUpdateSelection  → after the user moves the cursor, loads the text before it again
  * onFinishInputView  → resets text buffer, pauses + deactivates (engine and what its
  *                      language model learned are kept; learned text is saved)
  * onTrimMemory       → discards the native runtime while hidden if the system trims the
@@ -33,6 +36,8 @@ import com.janmurin.dashermobile.ui.DasherHostViews
  * - Creates the Dasher UI via [com.janmurin.dashermobile.ui.DasherHostUi] in compact IME mode.
  * - Routes rendered frames to [com.janmurin.dashermobile.ui.DasherCanvasView].
  * - Bridges DasherCore output text to the target editor via [DasherImeTextSink].
+ * - Continues at the editor's cursor as if the text before it had been written with Dasher:
+ *   on start, after the user moves the cursor, and from the locate button on the canvas.
  * - Manages the [TiltInputProvider] sensor registration in sync with visibility and mode.
  * - Persists and restores language, language-model and input-mode preferences via [DasherPrefs].
  */
@@ -40,6 +45,10 @@ class DasherImeService : InputMethodService() {
 
     companion object {
         private const val TAG = "DasherImeService"
+        /** Characters before the cursor loaded into the engine; prediction needs only a few. */
+        private const val MAX_CONTEXT_CHARS = 200
+        /** Lets the editor's selection updates for Dasher's own edits settle before comparing. */
+        private const val CURSOR_SYNC_DELAY_MS = 150L
     }
 
     private var hostHandle: DasherSessionCoordinator.HostHandle? = null
@@ -52,6 +61,10 @@ class DasherImeService : InputMethodService() {
     private var suppressModeSwitchCallback = false
     private var shouldResetBufferOnNextStart = true
     private var isInputViewActive = false
+    /** Editor text before the part loaded into the engine (cut at a character it lacks). */
+    private var contextOutsideEngine = ""
+    private val cursorSyncHandler = Handler(Looper.getMainLooper())
+    private val cursorSyncRunnable = Runnable { syncToCursor(force = false) }
 
     override fun onCreateInputView(): View {
         hostViews?.let { return it.root }
@@ -93,6 +106,7 @@ class DasherImeService : InputMethodService() {
                 views.statusView.text = "$modeLabel | $stateLabel"
                 views.languageSpinner?.isEnabled = paused
                 views.languageModelSpinner?.isEnabled = paused
+                views.locateButton?.visibility = if (paused) View.VISIBLE else View.GONE
                 val showCanvasCalibrateButton = paused && mode == InputMode.TILT
                 views.canvasCalibrateButton.visibility = if (showCanvasCalibrateButton) View.VISIBLE else View.GONE
                 views.canvasCalibrateButton.isEnabled = showCanvasCalibrateButton
@@ -121,6 +135,8 @@ class DasherImeService : InputMethodService() {
         views.canvasView.onSurfaceSizeChanged = { width, height ->
             DasherSessionCoordinator.onSurfaceSizeChanged(localHost, width, height)
             applyPendingLanguage(localHost)
+            // The engine can only load text once it has a surface (realised).
+            syncToCursor(force = true)
         }
         views.canvasView.onTouchInput = { action, x, y ->
             DasherSessionCoordinator.onTouch(localHost, action, x, y)
@@ -145,6 +161,10 @@ class DasherImeService : InputMethodService() {
         views.calibrateButton?.setOnClickListener {
             tiltProvider?.calibrate()
             DasherSessionCoordinator.unpause(localHost)
+        }
+
+        views.locateButton?.setOnClickListener {
+            syncToCursor(force = true)
         }
 
         views.canvasCalibrateButton.setOnClickListener {
@@ -182,8 +202,10 @@ class DasherImeService : InputMethodService() {
         
         DasherSessionCoordinator.requestPause(localHost)
         imeTextSink?.resetTracking()
+        contextOutsideEngine = ""
         hostViews?.outputView?.text = ""
         DasherSessionCoordinator.resetOutputText(localHost)
+        syncToCursor(force = true)
         
         if (DasherSessionCoordinator.getInputMode() == InputMode.TILT && !DasherSessionCoordinator.isPaused()) {
             tiltProvider?.register()
@@ -192,6 +214,7 @@ class DasherImeService : InputMethodService() {
 
     override fun onFinishInputView(finishingInput: Boolean) {
         isInputViewActive = false
+        cursorSyncHandler.removeCallbacks(cursorSyncRunnable)
         tiltProvider?.unregister()
         hostHandle?.let {
             DasherSessionCoordinator.clearTiltInput(it)
@@ -203,7 +226,22 @@ class DasherImeService : InputMethodService() {
             DasherSessionCoordinator.deactivateHost(it)
         }
         imeTextSink?.resetTracking()
+        contextOutsideEngine = ""
         super.onFinishInputView(finishingInput)
+    }
+
+    override fun onUpdateSelection(
+        oldSelStart: Int,
+        oldSelEnd: Int,
+        newSelStart: Int,
+        newSelEnd: Int,
+        candidatesStart: Int,
+        candidatesEnd: Int
+    ) {
+        super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+        if (!isInputViewActive || newSelStart != newSelEnd) return
+        cursorSyncHandler.removeCallbacks(cursorSyncRunnable)
+        cursorSyncHandler.postDelayed(cursorSyncRunnable, CURSOR_SYNC_DELAY_MS)
     }
 
     override fun onTrimMemory(level: Int) {
@@ -214,6 +252,7 @@ class DasherImeService : InputMethodService() {
     }
 
     override fun onDestroy() {
+        cursorSyncHandler.removeCallbacks(cursorSyncRunnable)
         tiltProvider?.unregister()
         tiltProvider = null
         hostHandle?.let { DasherSessionCoordinator.unregisterHost(it) }
@@ -284,7 +323,6 @@ class DasherImeService : InputMethodService() {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 if (suppressLanguageSwitchCallback) return
                 val selectedLanguage = languages[position]
-                imeTextSink?.resetTracking()
                 val switched = DasherSessionCoordinator.setLanguage(localHost, selectedLanguage)
                 if (!switched) {
                     syncLanguageSelection()
@@ -292,7 +330,8 @@ class DasherImeService : InputMethodService() {
                 }
                 pendingStartupLanguage = null
                 DasherPrefs.setLanguage(this@DasherImeService, selectedLanguage)
-                views.outputView.text = ""
+                // The switch emptied the engine text; reload the text before the cursor.
+                syncToCursor(force = true)
             }
 
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
@@ -347,6 +386,33 @@ class DasherImeService : InputMethodService() {
         suppressLanguageModelCallback = true
         views.languageModelSpinner?.setSelection(selection, false)
         suppressLanguageModelCallback = false
+    }
+
+    /**
+     * Loads the text before the cursor into the engine, so Dasher continues exactly as if that
+     * text had been written with it, and makes it the sink's baseline.
+     *
+     * Runs only while the keyboard is shown and Dasher is paused.  Without [force] it does
+     * nothing while the editor's text before the cursor is what Dasher believes it is, i.e. the
+     * cursor is where Dasher left it.  Nothing is loaded in editors that must not be learned
+     * from.
+     */
+    private fun syncToCursor(force: Boolean) {
+        val localHost = hostHandle ?: return
+        val sink = imeTextSink ?: return
+        if (!isInputViewActive || !DasherSessionCoordinator.isPaused()) return
+        val readable = allowsLearning(currentInputEditorInfo)
+        if (!force && !readable) return
+        val before = if (readable) {
+            currentInputConnection?.getTextBeforeCursor(MAX_CONTEXT_CHARS, 0)?.toString().orEmpty()
+        } else {
+            ""
+        }
+        if (!force && before == (contextOutsideEngine + sink.trackedText).takeLast(MAX_CONTEXT_CHARS)) return
+        val loaded = DasherSessionCoordinator.setContext(localHost, before) ?: return
+        contextOutsideEngine = if (before.endsWith(loaded)) before.dropLast(loaded.length) else before
+        sink.resetTracking(loaded)
+        hostViews?.outputView?.text = loaded
     }
 
     /**
