@@ -22,12 +22,19 @@ enum class InputMode {
 enum class LanguageModel(val id: Int) {
     /** Prediction by Partial Match – the default, self-learning model. */
     PPM(0),
-    /** Word-based n-gram model. */
+    /**
+     * Word-based n-gram model.  Not offered in the UI (see [selectable]): in the bundled
+     * DasherCore its probabilities are garbage, because `CWordLanguageModel::GetProbs` uses a
+     * spelling factor that is never initialised for a new context.
+     */
     WORD(2),
     /** KenLM binary model file loaded from the device's private files directory. */
     KENLM(5);
 
     companion object {
+        /** Models offered in the settings screen and the keyboard panel. */
+        val selectable: List<LanguageModel> = listOf(PPM, KENLM)
+
         /**
          * Returns the [LanguageModel] matching [id], falling back to [PPM] for unknown values.
          */
