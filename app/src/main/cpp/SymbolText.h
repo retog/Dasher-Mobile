@@ -35,4 +35,10 @@ std::string CorpusToSymbolText(const std::string &corpus);
  */
 std::string ToPlainText(const std::string &symbolText);
 
+/**
+ * @brief Converts plain text from an editor to alphabet symbol text: ' ' → "□", and each line
+ *        break ("\r\n", "\n" or a lone "\r") → "¶".  The inverse of @ref ToPlainText.
+ */
+std::string ToSymbolText(const std::string &plain);
+
 }

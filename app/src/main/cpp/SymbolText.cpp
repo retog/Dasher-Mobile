@@ -39,6 +39,25 @@ std::string CorpusToSymbolText(const std::string &corpus) {
     return out;
 }
 
+std::string ToSymbolText(const std::string &plain) {
+    std::string out;
+    out.reserve(plain.size() + plain.size() / 4);
+    for (size_t i = 0; i < plain.size(); ++i) {
+        const char c = plain[i];
+        if (c == ' ') {
+            out += kSpaceSymbol;
+        } else if (c == '\n') {
+            out += kNewlineSymbol;
+        } else if (c == '\r') {
+            if (i + 1 < plain.size() && plain[i + 1] == '\n') ++i;
+            out += kNewlineSymbol;
+        } else {
+            out += c;
+        }
+    }
+    return out;
+}
+
 std::string ToPlainText(const std::string &symbolText) {
     constexpr size_t kSpaceLen = sizeof(kSpaceSymbol) - 1;
     constexpr size_t kNewlineLen = sizeof(kNewlineSymbol) - 1;

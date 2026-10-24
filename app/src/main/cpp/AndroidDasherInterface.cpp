@@ -15,6 +15,7 @@
 #include "AndroidDasherInterface.h"
 #include "SymbolText.h"
 
+#include "DasherCore/Alphabet/AlphInfo.h"
 #include "DasherCore/DasherInput.h"
 #include "DasherCore/DasherScreen.h"
 #include "DasherCore/ModuleManager.h"
@@ -25,6 +26,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -560,6 +562,43 @@ void AndroidDasherInterface::ResetOutputText() {
     if (m_realized) {
         SetBuffer(0);
     }
+}
+
+std::string AndroidDasherInterface::SetContext(const std::string &textBeforeCursor) {
+    FlushTrainingText();
+    m_editBuffer.clear();
+    m_symbolEnds.clear();
+    const Dasher::CAlphInfo *alphabet = m_realized ? GetActiveAlphabet() : nullptr;
+    if (!alphabet) {
+        return {};
+    }
+
+    if (m_startedByTouch) {
+        KeyDown(nowMs(), Dasher::Keys::Primary_Input);
+        m_startedByTouch = false;
+    }
+
+    std::unordered_set<std::string> known;
+    for (int i = 1; i < alphabet->iEnd; ++i) {
+        known.insert(alphabet->GetText(i));
+    }
+    // One symbol per UTF-8 character; restart after any character the alphabet lacks.
+    const std::string symbolText = DasherAndroid::ToSymbolText(textBeforeCursor);
+    for (size_t i = 0; i < symbolText.size();) {
+        size_t next = i + 1;
+        while (next < symbolText.size() && (static_cast<unsigned char>(symbolText[next]) & 0xC0) == 0x80) ++next;
+        const std::string ch = symbolText.substr(i, next - i);
+        if (known.count(ch)) {
+            m_editBuffer += ch;
+            m_symbolEnds.push_back(m_editBuffer.size());
+        } else {
+            m_editBuffer.clear();
+            m_symbolEnds.clear();
+        }
+        i = next;
+    }
+    SetBuffer(static_cast<int>(m_symbolEnds.size()));
+    return GetOutputText();
 }
 
 void AndroidDasherInterface::SetLearningEnabled(bool enabled) {

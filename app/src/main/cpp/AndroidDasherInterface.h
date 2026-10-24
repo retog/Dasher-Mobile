@@ -201,6 +201,20 @@ public:
      */
     void SetLearningEnabled(bool enabled);
 
+    /**
+     * @brief Loads the text before an editor's cursor as if it had been written with Dasher.
+     *
+     * The text replaces the edit buffer and the model is rebuilt at its end, so the next boxes
+     * are sized exactly as if the user had just written it.  It is not learned.  Only the part
+     * after the last character the alphabet lacks is kept, since DasherCore cannot rebuild
+     * across one; reversing therefore stops there.  Text written before is saved first.
+     *
+     * @param textBeforeCursor Plain text before the cursor.
+     * @return The plain text actually loaded, i.e. the new output text; empty until the engine
+     *         is realised.
+     */
+    std::string SetContext(const std::string &textBeforeCursor);
+
 protected:
     /** @brief Registers the @c AndroidPointerInput module with DasherCore. */
     void CreateModules() override;
