@@ -121,6 +121,15 @@ class NativeBridge {
         @JvmStatic external fun nativeFlushTrainingText(handle: Long)
 
         /**
+         * Turns learning from written text on or off.  Off, the language model is not updated
+         * and nothing is saved to the user training file.  A new session starts with it on.
+         *
+         * @param handle  Opaque session handle.
+         * @param enabled `false` for editors whose text must not be learned (passwords).
+         */
+        @JvmStatic external fun nativeSetLearningEnabled(handle: Long, enabled: Boolean)
+
+        /**
          * Returns the identifier of the currently active Dasher alphabet
          * (e.g. `"English with limited punctuation"`, `"Slovak"`).
          *

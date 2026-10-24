@@ -361,6 +361,9 @@ AndroidDasherInterface::AndroidDasherInterface(const std::string &filesDir)
     : AndroidSettingsHolder(filesDir + "/dasher_settings.xml")
     , Dasher::CDashIntfScreenMsgs(AndroidSettingsHolder::settings.get())
 {
+    // Learning is on unless a host turns it off for one editor (SetLearningEnabled); the value
+    // is persisted, so do not let an editor that switched it off outlive the process.
+    SetBoolParameter(Dasher::BP_LM_ADAPTIVE, true);
     __android_log_print(ANDROID_LOG_INFO, LOG_TAG, "created (filesDir=%s)", filesDir.c_str());
     __android_log_print(ANDROID_LOG_INFO,
                         LOG_TAG,
@@ -557,6 +560,14 @@ void AndroidDasherInterface::ResetOutputText() {
     if (m_realized) {
         SetBuffer(0);
     }
+}
+
+void AndroidDasherInterface::SetLearningEnabled(bool enabled) {
+    if (GetBoolParameter(Dasher::BP_LM_ADAPTIVE) == enabled) {
+        return;
+    }
+    FlushTrainingText();
+    SetBoolParameter(Dasher::BP_LM_ADAPTIVE, enabled);
 }
 
 void AndroidDasherInterface::FlushTrainingText() {

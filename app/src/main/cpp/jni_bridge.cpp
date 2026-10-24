@@ -550,4 +550,17 @@ Java_com_janmurin_dashermobile_NativeBridge_nativeFlushTrainingText(JNIEnv *,
     session->iface->FlushTrainingText();
 }
 
+/** @brief JNI binding for @c NativeBridge.nativeSetLearningEnabled. Turns learning from written text on or off. */
+JNIEXPORT void JNICALL
+Java_com_janmurin_dashermobile_NativeBridge_nativeSetLearningEnabled(JNIEnv *,
+                                                                       jclass,
+                                                                       jlong handle,
+                                                                       jboolean enabled) {
+    auto *session = fromHandle(handle);
+    if (!session || !session->iface) {
+        return;
+    }
+    session->iface->SetLearningEnabled(enabled == JNI_TRUE);
+}
+
 }

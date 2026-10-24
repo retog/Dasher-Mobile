@@ -192,6 +192,15 @@ public:
      */
     void FlushTrainingText();
 
+    /**
+     * @brief Turns learning from written text on or off (DasherCore's @c BP_LM_ADAPTIVE).
+     *
+     * Off, the language model is neither updated in memory nor is text saved to the user
+     * training file; text written while it was on is saved first.  Hosts turn it off for
+     * password fields.  A new engine always starts with learning on.
+     */
+    void SetLearningEnabled(bool enabled);
+
 protected:
     /** @brief Registers the @c AndroidPointerInput module with DasherCore. */
     void CreateModules() override;

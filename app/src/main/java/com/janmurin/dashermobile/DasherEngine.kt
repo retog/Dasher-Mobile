@@ -394,6 +394,14 @@ class DasherEngine(
     }
 
     /**
+     * Turns learning from written text on or off; see [NativeBridge.nativeSetLearningEnabled].
+     */
+    fun setLearningEnabled(enabled: Boolean) {
+        if (destroyed || nativeHandle == 0L) return
+        NativeBridge.nativeSetLearningEnabled(nativeHandle, enabled)
+    }
+
+    /**
      * Returns the [DasherLanguage] currently active in the native session.
      *
      * Falls back to [DasherLanguage.ENGLISH] when the engine is destroyed.

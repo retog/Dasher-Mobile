@@ -364,6 +364,16 @@ object DasherSessionCoordinator {
     }
 
     /**
+     * Turns learning from written text on or off on the engine if [host] is active.
+     */
+    fun setLearningEnabled(host: HostHandle, enabled: Boolean) {
+        synchronized(lock) {
+            if (activeHostId != host.id) return
+            engine?.setLearningEnabled(enabled)
+        }
+    }
+
+    /**
      * Attempts to switch the input mode on the engine if [host] is active.
      *
      * @return `true` if the switch succeeded.
