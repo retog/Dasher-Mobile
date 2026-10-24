@@ -199,6 +199,9 @@ protected:
 private:
     /// Accumulated output text buffer, updated by editOutput/editDelete.
     std::string m_editBuffer;
+    /// Byte offset in @ref m_editBuffer where each output symbol ends.  DasherCore counts
+    /// offsets in symbols, and a symbol's text can be several bytes or code points.
+    std::vector<size_t> m_symbolEnds;
     /// Off-screen command-buffer renderer.
     std::unique_ptr<AndroidCommandScreen> m_screen;
     /// Non-owning pointer to the registered pointer input device.

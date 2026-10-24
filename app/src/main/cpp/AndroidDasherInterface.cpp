@@ -350,32 +350,6 @@ unsigned long nowMs() {
     return static_cast<unsigned long>(std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
 }
 
-/**
- * @brief Advances @p pos by @p count UTF-8 characters in @p s.
- *
- * DasherCore counts edit-buffer offsets in characters, but the buffer is UTF-8: letters with
- * diacritics and the "□" / "¶" symbols take several bytes each.
- *
- * @return Byte offset after @p count characters, or @c s.size() if the text ends first.
- */
-size_t advanceChars(const std::string &s, size_t pos, size_t count) {
-    while (pos < s.size() && count > 0) {
-        ++pos;
-        while (pos < s.size() && (static_cast<unsigned char>(s[pos]) & 0xC0) == 0x80) ++pos;
-        --count;
-    }
-    return pos;
-}
-
-/** @brief Returns the number of UTF-8 characters in @p s. */
-unsigned int charCount(const std::string &s) {
-    unsigned int n = 0;
-    for (const unsigned char c : s) {
-        if ((c & 0xC0) != 0x80) ++n;
-    }
-    return n;
-}
-
 }
 
 AndroidSettingsHolder::AndroidSettingsHolder(const std::string &settingsPath) {
@@ -480,22 +454,22 @@ void AndroidDasherInterface::SetAlphabetId(const std::string &alphabetId) {
     }
 
     m_editBuffer.clear();
+    m_symbolEnds.clear();
 
     if (!m_realized) {
         m_pendingAlphabetId = alphabetId;
         return;
     }
 
-    if (GetStringParameter(Dasher::SP_ALPHABET_ID) == alphabetId) {
-        return;
+    if (GetStringParameter(Dasher::SP_ALPHABET_ID) != alphabetId) {
+        if (m_startedByTouch) {
+            KeyDown(nowMs(), Dasher::Keys::Primary_Input);
+            m_startedByTouch = false;
+        }
+        SetStringParameter(Dasher::SP_ALPHABET_ID, alphabetId);
     }
-
-    if (m_startedByTouch) {
-        KeyDown(nowMs(), Dasher::Keys::Primary_Input);
-        m_startedByTouch = false;
-    }
-
-    SetStringParameter(Dasher::SP_ALPHABET_ID, alphabetId);
+    // The model must match the emptied buffer; an alphabet switch keeps the old offset.
+    ResetOutputText();
 }
 
 int AndroidDasherInterface::GetLanguageModelId() const {
@@ -535,29 +509,33 @@ void AndroidDasherInterface::SetMovementSpeedPercent(int percent) {
 }
 
 unsigned int AndroidDasherInterface::ctrlMove(bool, Dasher::EditDistance) {
-    return charCount(m_editBuffer);
+    return static_cast<unsigned int>(m_symbolEnds.size());
 }
 
 unsigned int AndroidDasherInterface::ctrlDelete(bool, Dasher::EditDistance) {
-    return charCount(m_editBuffer);
+    return static_cast<unsigned int>(m_symbolEnds.size());
 }
 
 void AndroidDasherInterface::editOutput(const std::string &strText, Dasher::CDasherNode *pCause) {
     m_editBuffer += strText;
+    m_symbolEnds.push_back(m_editBuffer.size());
     Dasher::CDashIntfScreenMsgs::editOutput(strText, pCause);
 }
 
 void AndroidDasherInterface::editDelete(const std::string &strText, Dasher::CDasherNode *pCause) {
-    if (!strText.empty() && m_editBuffer.size() >= strText.size()) {
-        m_editBuffer.erase(m_editBuffer.size() - strText.size());
+    if (!m_symbolEnds.empty()) {
+        m_symbolEnds.pop_back();
+        m_editBuffer.resize(m_symbolEnds.empty() ? 0 : m_symbolEnds.back());
     }
     Dasher::CDashIntfScreenMsgs::editDelete(strText, pCause);
 }
 
 std::string AndroidDasherInterface::GetContext(unsigned int iStart, unsigned int iLength) {
-    const size_t begin = advanceChars(m_editBuffer, 0, iStart);
-    if (begin >= m_editBuffer.size()) return {};
-    return m_editBuffer.substr(begin, advanceChars(m_editBuffer, begin, iLength) - begin);
+    const size_t count = m_symbolEnds.size();
+    if (iLength == 0 || iStart >= count) return {};
+    const size_t end = std::min(count, static_cast<size_t>(iStart) + iLength);
+    const size_t begin = iStart == 0 ? 0 : m_symbolEnds[iStart - 1];
+    return m_editBuffer.substr(begin, m_symbolEnds[end - 1] - begin);
 }
 
 std::string AndroidDasherInterface::GetAllContext() {
@@ -565,7 +543,7 @@ std::string AndroidDasherInterface::GetAllContext() {
 }
 
 int AndroidDasherInterface::GetAllContextLenght() {
-    return static_cast<int>(charCount(m_editBuffer));
+    return static_cast<int>(m_symbolEnds.size());
 }
 
 std::string AndroidDasherInterface::GetOutputText() const {
@@ -575,6 +553,7 @@ std::string AndroidDasherInterface::GetOutputText() const {
 void AndroidDasherInterface::ResetOutputText() {
     FlushTrainingText();
     m_editBuffer.clear();
+    m_symbolEnds.clear();
     if (m_realized) {
         SetBuffer(0);
     }
