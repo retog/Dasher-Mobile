@@ -22,12 +22,19 @@ enum class InputMode {
 enum class LanguageModel(val id: Int) {
     /** Prediction by Partial Match – the default, self-learning model. */
     PPM(0),
-    /** Word-based n-gram model. */
+    /**
+     * Word-based n-gram model.  Not offered in the UI (see [selectable]): in the bundled
+     * DasherCore its probabilities are garbage, because `CWordLanguageModel::GetProbs` uses a
+     * spelling factor that is never initialised for a new context.
+     */
     WORD(2),
     /** KenLM binary model file loaded from the device's private files directory. */
     KENLM(5);
 
     companion object {
+        /** Models offered in the settings screen and the keyboard panel. */
+        val selectable: List<LanguageModel> = listOf(PPM, KENLM)
+
         /**
          * Returns the [LanguageModel] matching [id], falling back to [PPM] for unknown values.
          */
@@ -366,13 +373,32 @@ class DasherEngine(
     }
 
     /**
-     * Clears the native output-text buffer.
+     * Clears the native output-text buffer and restarts prediction from an empty context.
      *
      * Should be called when the host wants to start a new "word" or text session.
      */
     fun resetOutputText() {
         if (destroyed || nativeHandle == 0L) return
         NativeBridge.nativeResetOutputText(nativeHandle)
+    }
+
+    /**
+     * Saves text written since the last flush to the user training file.
+     *
+     * Destroying the engine flushes as well; call this when the host pauses so learned text
+     * survives the process being killed.
+     */
+    fun flushTrainingText() {
+        if (destroyed || nativeHandle == 0L) return
+        NativeBridge.nativeFlushTrainingText(nativeHandle)
+    }
+
+    /**
+     * Turns learning from written text on or off; see [NativeBridge.nativeSetLearningEnabled].
+     */
+    fun setLearningEnabled(enabled: Boolean) {
+        if (destroyed || nativeHandle == 0L) return
+        NativeBridge.nativeSetLearningEnabled(nativeHandle, enabled)
     }
 
     /**

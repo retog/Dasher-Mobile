@@ -13,6 +13,7 @@
  */
 
 #include "AndroidDasherInterface.h"
+#include "SymbolText.h"
 
 #include "DasherCore/DasherInput.h"
 #include "DasherCore/DasherScreen.h"
@@ -360,6 +361,9 @@ AndroidDasherInterface::AndroidDasherInterface(const std::string &filesDir)
     : AndroidSettingsHolder(filesDir + "/dasher_settings.xml")
     , Dasher::CDashIntfScreenMsgs(AndroidSettingsHolder::settings.get())
 {
+    // Learning is on unless a host turns it off for one editor (SetLearningEnabled); the value
+    // is persisted, so do not let an editor that switched it off outlive the process.
+    SetBoolParameter(Dasher::BP_LM_ADAPTIVE, true);
     __android_log_print(ANDROID_LOG_INFO, LOG_TAG, "created (filesDir=%s)", filesDir.c_str());
     __android_log_print(ANDROID_LOG_INFO,
                         LOG_TAG,
@@ -367,7 +371,9 @@ AndroidDasherInterface::AndroidDasherInterface(const std::string &filesDir)
                         GetStringParameter(Dasher::SP_INPUT_FILTER).c_str());
 }
 
-AndroidDasherInterface::~AndroidDasherInterface() = default;
+AndroidDasherInterface::~AndroidDasherInterface() {
+    FlushTrainingText();
+}
 
 void AndroidDasherInterface::CallNewFrame(unsigned long timeMs, bool forceRedraw) {
     NewFrame(timeMs, forceRedraw);
@@ -451,22 +457,22 @@ void AndroidDasherInterface::SetAlphabetId(const std::string &alphabetId) {
     }
 
     m_editBuffer.clear();
+    m_symbolEnds.clear();
 
     if (!m_realized) {
         m_pendingAlphabetId = alphabetId;
         return;
     }
 
-    if (GetStringParameter(Dasher::SP_ALPHABET_ID) == alphabetId) {
-        return;
+    if (GetStringParameter(Dasher::SP_ALPHABET_ID) != alphabetId) {
+        if (m_startedByTouch) {
+            KeyDown(nowMs(), Dasher::Keys::Primary_Input);
+            m_startedByTouch = false;
+        }
+        SetStringParameter(Dasher::SP_ALPHABET_ID, alphabetId);
     }
-
-    if (m_startedByTouch) {
-        KeyDown(nowMs(), Dasher::Keys::Primary_Input);
-        m_startedByTouch = false;
-    }
-
-    SetStringParameter(Dasher::SP_ALPHABET_ID, alphabetId);
+    // The model must match the emptied buffer; an alphabet switch keeps the old offset.
+    ResetOutputText();
 }
 
 int AndroidDasherInterface::GetLanguageModelId() const {
@@ -482,6 +488,8 @@ void AndroidDasherInterface::SetLanguageModelId(int modelId) {
         KeyDown(nowMs(), Dasher::Keys::Primary_Input);
         m_startedByTouch = false;
     }
+    // The switch recreates the alphabet manager, dropping its unsaved training buffer.
+    FlushTrainingText();
     SetLongParameter(Dasher::LP_LANGUAGE_MODEL_ID, static_cast<long>(resolved));
 }
 
@@ -504,28 +512,33 @@ void AndroidDasherInterface::SetMovementSpeedPercent(int percent) {
 }
 
 unsigned int AndroidDasherInterface::ctrlMove(bool, Dasher::EditDistance) {
-    return static_cast<unsigned int>(m_editBuffer.size());
+    return static_cast<unsigned int>(m_symbolEnds.size());
 }
 
 unsigned int AndroidDasherInterface::ctrlDelete(bool, Dasher::EditDistance) {
-    return static_cast<unsigned int>(m_editBuffer.size());
+    return static_cast<unsigned int>(m_symbolEnds.size());
 }
 
 void AndroidDasherInterface::editOutput(const std::string &strText, Dasher::CDasherNode *pCause) {
     m_editBuffer += strText;
+    m_symbolEnds.push_back(m_editBuffer.size());
     Dasher::CDashIntfScreenMsgs::editOutput(strText, pCause);
 }
 
 void AndroidDasherInterface::editDelete(const std::string &strText, Dasher::CDasherNode *pCause) {
-    if (!strText.empty() && m_editBuffer.size() >= strText.size()) {
-        m_editBuffer.erase(m_editBuffer.size() - strText.size());
+    if (!m_symbolEnds.empty()) {
+        m_symbolEnds.pop_back();
+        m_editBuffer.resize(m_symbolEnds.empty() ? 0 : m_symbolEnds.back());
     }
     Dasher::CDashIntfScreenMsgs::editDelete(strText, pCause);
 }
 
 std::string AndroidDasherInterface::GetContext(unsigned int iStart, unsigned int iLength) {
-    if (iStart >= m_editBuffer.size()) return {};
-    return m_editBuffer.substr(iStart, iLength);
+    const size_t count = m_symbolEnds.size();
+    if (iLength == 0 || iStart >= count) return {};
+    const size_t end = std::min(count, static_cast<size_t>(iStart) + iLength);
+    const size_t begin = iStart == 0 ? 0 : m_symbolEnds[iStart - 1];
+    return m_editBuffer.substr(begin, m_symbolEnds[end - 1] - begin);
 }
 
 std::string AndroidDasherInterface::GetAllContext() {
@@ -533,14 +546,33 @@ std::string AndroidDasherInterface::GetAllContext() {
 }
 
 int AndroidDasherInterface::GetAllContextLenght() {
-    return static_cast<int>(m_editBuffer.size());
+    return static_cast<int>(m_symbolEnds.size());
 }
 
 std::string AndroidDasherInterface::GetOutputText() const {
-    return m_editBuffer;
+    return DasherAndroid::ToPlainText(m_editBuffer);
 }
 
 void AndroidDasherInterface::ResetOutputText() {
+    FlushTrainingText();
     m_editBuffer.clear();
+    m_symbolEnds.clear();
+    if (m_realized) {
+        SetBuffer(0);
+    }
+}
+
+void AndroidDasherInterface::SetLearningEnabled(bool enabled) {
+    if (GetBoolParameter(Dasher::BP_LM_ADAPTIVE) == enabled) {
+        return;
+    }
+    FlushTrainingText();
+    SetBoolParameter(Dasher::BP_LM_ADAPTIVE, enabled);
+}
+
+void AndroidDasherInterface::FlushTrainingText() {
+    if (m_realized) {
+        WriteTrainFileFull();
+    }
 }
 

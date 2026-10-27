@@ -171,15 +171,35 @@ public:
     ///@}
 
     /**
-     * @brief Returns the full accumulated output text.
-     * @return The contents of the internal edit buffer.
+     * @brief Returns the full accumulated output text as plain text.
+     * @return The internal edit buffer with the alphabet's "□" / "¶" symbols turned into
+     *         a space / newline (see SymbolText.h).
      */
     std::string GetOutputText() const;
 
     /**
-     * @brief Clears the internal edit buffer.
+     * @brief Starts a new text: saves learned text, clears the edit buffer and rebuilds the
+     *        Dasher model with an empty context.
      */
     void ResetOutputText();
+
+    /**
+     * @brief Appends text written since the last flush to the user training file.
+     *
+     * DasherCore only does this on its own when the writing context jumps or the alphabet
+     * changes, so hosts call it when they pause; it also runs before a language-model switch
+     * and on destruction.  No-op until the engine is realised.
+     */
+    void FlushTrainingText();
+
+    /**
+     * @brief Turns learning from written text on or off (DasherCore's @c BP_LM_ADAPTIVE).
+     *
+     * Off, the language model is neither updated in memory nor is text saved to the user
+     * training file; text written while it was on is saved first.  Hosts turn it off for
+     * password fields.  A new engine always starts with learning on.
+     */
+    void SetLearningEnabled(bool enabled);
 
 protected:
     /** @brief Registers the @c AndroidPointerInput module with DasherCore. */
@@ -188,6 +208,9 @@ protected:
 private:
     /// Accumulated output text buffer, updated by editOutput/editDelete.
     std::string m_editBuffer;
+    /// Byte offset in @ref m_editBuffer where each output symbol ends.  DasherCore counts
+    /// offsets in symbols, and a symbol's text can be several bytes or code points.
+    std::vector<size_t> m_symbolEnds;
     /// Off-screen command-buffer renderer.
     std::unique_ptr<AndroidCommandScreen> m_screen;
     /// Non-owning pointer to the registered pointer input device.

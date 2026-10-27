@@ -395,7 +395,7 @@ private fun LanguageModelDialog(
         title = { Text(text = stringResource(id = R.string.select_language_model)) },
         text = {
             Column {
-                val models = listOf(LanguageModel.PPM, LanguageModel.WORD, LanguageModel.KENLM)
+                val models = LanguageModel.selectable
                 models.forEach { model ->
                     Row(
                         modifier = Modifier

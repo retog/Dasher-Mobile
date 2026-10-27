@@ -1,4 +1,5 @@
 #include "DasherCore/FileUtils.h"
+#include "SymbolText.h"
 
 #include <android/asset_manager.h>
 #include <android/asset_manager_jni.h>
@@ -34,6 +35,11 @@ std::string resolvePath(const std::string &path) {
     return joinPath(g_userDataDir, path);
 }
 
+/// Training corpora are the only plain-text files scanned; alphabets and colours are XML.
+bool isTrainingText(const std::string &path) {
+    return path.size() >= 4 && path.compare(path.size() - 4, 4, ".txt") == 0;
+}
+
 bool parseAsset(AbstractParser *parser, const std::string &assetPath) {
     if (!g_assetManager || !parser) return false;
     AAsset *asset = AAssetManager_open(g_assetManager, assetPath.c_str(), AASSET_MODE_BUFFER);
@@ -51,6 +57,11 @@ bool parseAsset(AbstractParser *parser, const std::string &assetPath) {
     AAsset_close(asset);
     if (read <= 0) return false;
 
+    // Bundled corpora separate words with real spaces and line breaks, but the alphabets type
+    // "□" (see SymbolText.h); without converting, the language model never sees a word gap.
+    if (isTrainingText(assetPath)) {
+        data = DasherAndroid::CorpusToSymbolText(data);
+    }
     std::istringstream stream(data);
     const bool ok = parser->Parse(assetPath, stream, false);
     if (ok) {
@@ -106,6 +117,7 @@ void Dasher::FileUtils::ScanFiles(AbstractParser *parser, const std::string &str
     if (local.is_open()) {
         local.close();
         const std::string localPath = resolvePath(strPattern);
+        // The user training file is written by DasherCore, so it is already symbol text.
         const bool parsedLocal = parser->ParseFile(localPath, true);
         __android_log_print(ANDROID_LOG_DEBUG,
                             LOG_TAG,

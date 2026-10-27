@@ -1,7 +1,9 @@
 package com.janmurin.dashermobile
 
+import android.content.ComponentCallbacks2
 import android.content.Context
 import android.inputmethodservice.InputMethodService
+import android.text.InputType
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
@@ -18,8 +20,12 @@ import com.janmurin.dashermobile.ui.DasherHostViews
  * ## Lifecycle overview
  * ```
  * onCreateInputView  → registers with DasherSessionCoordinator, wires callbacks
- * onStartInputView   → activates the host, resets text buffer, starts frame loop
- * onFinishInputView  → pauses + deactivates + discards native runtime
+ * onStartInputView   → activates the host, resets text buffer, turns learning off for
+ *                      password fields, starts frame loop
+ * onFinishInputView  → resets text buffer, pauses + deactivates (engine and what its
+ *                      language model learned are kept; learned text is saved)
+ * onTrimMemory       → discards the native runtime while hidden if the system trims the
+ *                      process as backgrounded (rare for the active keyboard)
  * onDestroy          → unregisters host, releases tilt sensor
  * ```
  *
@@ -171,6 +177,7 @@ class DasherImeService : InputMethodService() {
         hostViews?.let { applyImeHeightSetting(it.root) }
         isInputViewActive = true
         DasherSessionCoordinator.activateHost(localHost)
+        DasherSessionCoordinator.setLearningEnabled(localHost, allowsLearning(info))
         applyImeStartupState(localHost)
         
         DasherSessionCoordinator.requestPause(localHost)
@@ -189,10 +196,21 @@ class DasherImeService : InputMethodService() {
         hostHandle?.let {
             DasherSessionCoordinator.clearTiltInput(it)
             DasherSessionCoordinator.requestPause(it)
+            // The engine outlives this editor: empty both the engine text and the sink's copy
+            // so activating for the next editor never replays or deletes this editor's text.
+            DasherSessionCoordinator.resetOutputText(it)
+            DasherSessionCoordinator.setLearningEnabled(it, true)
             DasherSessionCoordinator.deactivateHost(it)
-            DasherSessionCoordinator.discardHostRuntime(it)
         }
+        imeTextSink?.resetTracking()
         super.onFinishInputView(finishingInput)
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (!isInputViewActive && level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) {
+            hostHandle?.let { DasherSessionCoordinator.discardHostRuntime(it) }
+        }
     }
 
     override fun onDestroy() {
@@ -282,7 +300,7 @@ class DasherImeService : InputMethodService() {
     }
 
     private fun setupLanguageModelControls(views: DasherHostViews, localHost: DasherSessionCoordinator.HostHandle) {
-        val models = listOf(LanguageModel.PPM, LanguageModel.WORD, LanguageModel.KENLM)
+        val models = LanguageModel.selectable
         val adapter = ArrayAdapter(
             this,
             android.R.layout.simple_spinner_item,
@@ -324,11 +342,28 @@ class DasherImeService : InputMethodService() {
 
     private fun syncLanguageModelSelection() {
         val views = hostViews ?: return
-        val models = listOf(LanguageModel.PPM, LanguageModel.WORD, LanguageModel.KENLM)
+        val models = LanguageModel.selectable
         val selection = models.indexOf(DasherSessionCoordinator.getLanguageModel()).coerceAtLeast(0)
         suppressLanguageModelCallback = true
         views.languageModelSpinner?.setSelection(selection, false)
         suppressLanguageModelCallback = false
+    }
+
+    /**
+     * Returns `false` for editors whose text must not be learned or saved: passwords, and
+     * editors that ask for no personalised learning (e.g. incognito browser tabs).
+     */
+    private fun allowsLearning(info: EditorInfo?): Boolean {
+        if (info == null) return true
+        if ((info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0) return false
+        val variation = info.inputType and InputType.TYPE_MASK_VARIATION
+        return when (info.inputType and InputType.TYPE_MASK_CLASS) {
+            InputType.TYPE_CLASS_TEXT -> variation != InputType.TYPE_TEXT_VARIATION_PASSWORD &&
+                variation != InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD &&
+                variation != InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD
+            InputType.TYPE_CLASS_NUMBER -> variation != InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            else -> true
+        }
     }
 
     private fun restoredLanguage(): DasherLanguage {

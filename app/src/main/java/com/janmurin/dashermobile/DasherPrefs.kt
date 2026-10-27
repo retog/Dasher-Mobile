@@ -49,11 +49,13 @@ object DasherPrefs {
 
     /**
      * Returns the persisted [LanguageModel], defaulting to [LanguageModel.PPM].
+     *
+     * A stored [LanguageModel.WORD] also yields PPM, as Word is no longer offered
+     * (see [LanguageModel.selectable]).
      */
     fun getLanguageModel(context: Context): LanguageModel {
         val value = prefs(context).getString(KEY_LANGUAGE_MODEL, "ppm")
         return when (value) {
-            "word" -> LanguageModel.WORD
             "kenlm" -> LanguageModel.KENLM
             else -> LanguageModel.PPM
         }
