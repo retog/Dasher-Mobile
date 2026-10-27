@@ -40,7 +40,9 @@ std::string ToPlainText(const std::string &symbolText);
  *
  * A carriage return is kept as one "\r", taking the '\n' of a "\r\n" with it.  No alphabet has
  * it, so text loaded from an editor restarts after such a line break, and reversing never
- * deletes half of a "\r\n".  Otherwise the inverse of @ref ToPlainText.
+ * deletes half of a "\r\n".  A literal "□" or "¶" also becomes "\r": read as the space or
+ * newline symbol, it would come back from @ref ToPlainText as ' ' or '\n', and the loaded text
+ * would no longer match the editor's.  Otherwise the inverse of @ref ToPlainText.
  */
 std::string ToSymbolText(const std::string &plain);
 

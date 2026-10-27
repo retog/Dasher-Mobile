@@ -44,9 +44,24 @@ class DasherImeTextSink(
         lastText = baseline
     }
 
-    /** The output text the editor is believed to hold before its cursor. */
-    val trackedText: String
-        get() = lastText
+    /**
+     * The text the editor is believed to hold before its cursor: the output text without the
+     * newlines a single-line editor never received.
+     */
+    val committedText: String
+        get() = if (acceptsNewlines) lastText else lastText.replace("\n", "")
+
+    /**
+     * `true` if the current editor takes newlines.  As in `TextView`, only a text editor with
+     * [InputType.TYPE_TEXT_FLAG_MULTI_LINE] does; [InputType.TYPE_TEXT_FLAG_IME_MULTI_LINE] marks
+     * a single-line editor.
+     */
+    val acceptsNewlines: Boolean
+        get() {
+            val inputType = editorInfoProvider()?.inputType ?: 0
+            val mask = InputType.TYPE_MASK_CLASS or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            return (inputType and mask) == (InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE)
+        }
 
     /**
      * Called each time DasherCore's output buffer changes.
@@ -56,13 +71,14 @@ class DasherImeTextSink(
      * last seen value.
      *
      * @param text The full output text produced by DasherCore so far in this session.
+     * @return `false` if [text] is the last seen value or there is no editor to edit.
      */
-    fun onTextChanged(text: String) {
+    fun onTextChanged(text: String): Boolean {
         if (text == lastText) {
-            return
+            return false
         }
 
-        val inputConnection = inputConnectionProvider() ?: return
+        val inputConnection = inputConnectionProvider() ?: return false
         val commonPrefixLength = commonPrefixLength(lastText, text)
         val deleteCount = committedLength(lastText.substring(commonPrefixLength))
         val insertedText = text.substring(commonPrefixLength)
@@ -76,6 +92,7 @@ class DasherImeTextSink(
         }
         inputConnection.endBatchEdit()
         lastText = text
+        return true
     }
 
     private fun commitInsertedText(inputConnection: InputConnection, insertedText: String) {
@@ -96,7 +113,7 @@ class DasherImeTextSink(
                 }
                 '\n' -> {
                     flushChunk()
-                    if (isMultiline()) {
+                    if (acceptsNewlines) {
                         inputConnection.commitText("\n", 1)
                     }
                 }
@@ -107,20 +124,9 @@ class DasherImeTextSink(
         flushChunk()
     }
 
-    /**
-     * Returns `true` if the current editor takes newlines.  As in `TextView`, only a text editor
-     * with [InputType.TYPE_TEXT_FLAG_MULTI_LINE] does; [InputType.TYPE_TEXT_FLAG_IME_MULTI_LINE]
-     * marks a single-line editor.
-     */
-    private fun isMultiline(): Boolean {
-        val inputType = editorInfoProvider()?.inputType ?: 0
-        val mask = InputType.TYPE_MASK_CLASS or InputType.TYPE_TEXT_FLAG_MULTI_LINE
-        return (inputType and mask) == (InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE)
-    }
-
     /** Returns how many characters of [text] were committed, i.e. without dropped newlines. */
     private fun committedLength(text: String): Int =
-        if (isMultiline()) text.length else text.count { it != '\n' }
+        if (acceptsNewlines) text.length else text.count { it != '\n' }
 
     private fun commonPrefixLength(left: String, right: String): Int {
         val max = minOf(left.length, right.length)
