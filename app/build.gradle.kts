@@ -4,6 +4,17 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// Nightly builds (-Pnightly) are signed with the nightly key so consecutive nightly APKs
+// share a signature and can be installed over one another. The key is not in the
+// repository: the nightly workflow decodes it from repository secrets and passes it in
+// through NIGHTLY_* environment variables (see "Nightly builds" in README.md). Other
+// release builds stay unsigned.
+val nightly = project.hasProperty("nightly")
+
+fun nightlySigning(name: String): String =
+    providers.environmentVariable(name).orNull
+        ?: throw GradleException("-Pnightly needs the environment variable $name (see \"Nightly builds\" in README.md)")
+
 android {
     namespace = "com.janmurin.dashermobile"
     compileSdk = 35
@@ -34,6 +45,19 @@ android {
         }
     }
 
+    if (nightly) {
+        signingConfigs {
+            create("nightly") {
+                // A relative path is taken from the repository root.
+                storeFile = rootProject.file(nightlySigning("NIGHTLY_KEYSTORE_FILE"))
+                storePassword = nightlySigning("NIGHTLY_KEYSTORE_PASSWORD")
+                keyAlias = nightlySigning("NIGHTLY_KEY_ALIAS")
+                // A PKCS12 keystore has one password for the store and its key.
+                keyPassword = nightlySigning("NIGHTLY_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -41,6 +65,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (nightly) {
+                signingConfig = signingConfigs.getByName("nightly")
+            }
         }
     }
     compileOptions {

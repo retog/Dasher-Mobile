@@ -10,3 +10,7 @@
 local.properties
 
 kenlm_models/
+
+# Signing keys, such as the nightly key (see "Nightly builds" in README.md)
+*.jks
+*.keystore
