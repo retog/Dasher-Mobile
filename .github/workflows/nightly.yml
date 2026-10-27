@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: nightly-apk
@@ -22,6 +22,17 @@ jobs:
       tag: ${{ steps.decide.outputs.tag }}
       previous_tag: ${{ steps.decide.outputs.previous_tag }}
     steps:
+      # The signing key is kept in repository secrets; see "Nightly builds" in README.md.
+      - name: Check for the signing key
+        env:
+          NIGHTLY_KEYSTORE_BASE64: ${{ secrets.NIGHTLY_KEYSTORE_BASE64 }}
+          NIGHTLY_KEYSTORE_PASSWORD: ${{ secrets.NIGHTLY_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$NIGHTLY_KEYSTORE_BASE64" ] || [ -z "$NIGHTLY_KEYSTORE_PASSWORD" ]; then
+            echo "::error::The secrets NIGHTLY_KEYSTORE_BASE64 and NIGHTLY_KEYSTORE_PASSWORD are not set; see \"Nightly builds\" in README.md."
+            exit 1
+          fi
+
       - name: Decide whether to build and compute tag
         id: decide
         env:
@@ -31,11 +42,12 @@ jobs:
           date_tag="nightly-$(date -u +%F)"
           releases=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100")
 
-          # The newest nightly release (the API lists releases newest first).
-          previous_tag=$(jq -r '[.[] | select(.tag_name | startswith("nightly-"))][0].tag_name // empty' <<< "$releases")
+          # The newest published nightly release (the API lists releases newest first).
+          previous_tag=$(jq -r '[.[] | select((.draft | not) and (.tag_name | startswith("nightly-")))][0].tag_name // empty' <<< "$releases")
           echo "previous_tag=$previous_tag" >> "$GITHUB_OUTPUT"
           if [ -n "$previous_tag" ]; then
-            previous_sha=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${previous_tag}" --jq .sha)
+            # A tag that no longer resolves to a commit counts as a change.
+            previous_sha=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${previous_tag}" --jq .sha) || previous_sha=""
             if [ "$previous_sha" = "$GITHUB_SHA" ]; then
               echo "No changes since ${previous_tag} (${previous_sha}) — skipping build."
               echo "should_build=false" >> "$GITHUB_OUTPUT"
@@ -43,14 +55,18 @@ jobs:
             fi
           fi
 
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            # Manual runs are suffixed with X<n>, one more than the highest manual
-            # release made today: nightly-2026-10-24-X1, -X2, ...
-            last_n=$(jq --arg prefix "${date_tag}-X" \
-              '[.[].tag_name | select(startswith($prefix)) | ltrimstr($prefix) | tonumber?] | max // 0' <<< "$releases")
-            tag="${date_tag}-X$((last_n + 1))"
-          else
+          # Tags used today, by a release or left behind by a deleted one.
+          taken=$(
+            jq -r '.[].tag_name' <<< "$releases"
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/${date_tag}" --jq '.[].ref | ltrimstr("refs/tags/")'
+          )
+          if [ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" ] && ! grep -qxF "$date_tag" <<< "$taken"; then
             tag="$date_tag"
+          else
+            # Manual runs, and a scheduled run whose tag is taken, are suffixed with X<n>,
+            # one more than the highest used today: nightly-2026-10-24-X1, -X2, ...
+            last_n=$(sed -n "s/^${date_tag}-X\([0-9]\{1,9\}\)\$/\1/p" <<< "$taken" | sort -n | tail -n 1)
+            tag="${date_tag}-X$((10#${last_n:-0} + 1))"
           fi
 
           echo "Building ${tag} at ${GITHUB_SHA}"
@@ -62,6 +78,8 @@ jobs:
     needs: check
     if: needs.check.outputs.should_build == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -84,8 +102,17 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # -Pnightly signs the APK with the public test certificate (keystore/README.md).
+      - name: Decode the signing key
+        env:
+          NIGHTLY_KEYSTORE_BASE64: ${{ secrets.NIGHTLY_KEYSTORE_BASE64 }}
+        run: base64 --decode <<< "$NIGHTLY_KEYSTORE_BASE64" > "$RUNNER_TEMP/nightly.jks"
+
+      # -Pnightly signs the APK with the nightly key (see "Nightly builds" in README.md).
       - name: Build release APK
+        env:
+          NIGHTLY_KEYSTORE_FILE: ${{ runner.temp }}/nightly.jks
+          NIGHTLY_KEYSTORE_PASSWORD: ${{ secrets.NIGHTLY_KEYSTORE_PASSWORD }}
+          NIGHTLY_KEY_ALIAS: dasher-nightly
         run: ./gradlew --no-daemon assembleRelease -Pnightly
 
       # Job outputs reach the scripts through env, never interpolated into them: a

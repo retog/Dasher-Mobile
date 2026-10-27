@@ -1,18 +1,19 @@
-import java.util.Properties
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
 
-// Nightly builds (-Pnightly) are signed with a checked-in, non-secret test
-// certificate (see keystore/README.md) so consecutive nightly APKs share a
-// signature and can be installed over one another. This is not a production
-// signing key, so other release builds stay unsigned.
-val nightlyKeystoreProperties = Properties().apply {
-    file("../keystore/nightly-test.properties").inputStream().use { load(it) }
-}
+// Nightly builds (-Pnightly) are signed with the nightly key so consecutive nightly APKs
+// share a signature and can be installed over one another. The key is not in the
+// repository: the nightly workflow decodes it from repository secrets and passes it in
+// through NIGHTLY_* environment variables (see "Nightly builds" in README.md). Other
+// release builds stay unsigned.
+val nightly = project.hasProperty("nightly")
+
+fun nightlySigning(name: String): String =
+    providers.environmentVariable(name).orNull
+        ?: throw GradleException("-Pnightly needs the environment variable $name (see \"Nightly builds\" in README.md)")
 
 android {
     namespace = "com.janmurin.dashermobile"
@@ -44,12 +45,15 @@ android {
         }
     }
 
-    signingConfigs {
-        create("nightly") {
-            storeFile = file("../keystore/${nightlyKeystoreProperties.getProperty("storeFile")}")
-            storePassword = nightlyKeystoreProperties.getProperty("storePassword")
-            keyAlias = nightlyKeystoreProperties.getProperty("keyAlias")
-            keyPassword = nightlyKeystoreProperties.getProperty("keyPassword")
+    if (nightly) {
+        signingConfigs {
+            create("nightly") {
+                storeFile = file(nightlySigning("NIGHTLY_KEYSTORE_FILE"))
+                storePassword = nightlySigning("NIGHTLY_KEYSTORE_PASSWORD")
+                keyAlias = nightlySigning("NIGHTLY_KEY_ALIAS")
+                // A PKCS12 keystore has one password for the store and its key.
+                keyPassword = nightlySigning("NIGHTLY_KEYSTORE_PASSWORD")
+            }
         }
     }
 
@@ -60,7 +64,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            if (project.hasProperty("nightly")) {
+            if (nightly) {
                 signingConfig = signingConfigs.getByName("nightly")
             }
         }

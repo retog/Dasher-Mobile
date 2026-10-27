@@ -36,13 +36,24 @@ The architecture diagram is available in [`docs/architecture.puml`](docs/archite
    ```bash
    ./gradlew assembleDebug      # debug APK
    ./gradlew assembleRelease    # release APK (update signing config first)
-   ./gradlew assembleRelease -Pnightly   # release APK signed with the public test key, as the nightly builds are
+   ./gradlew assembleRelease -Pnightly   # release APK signed with the nightly key, as the nightly builds are (see below)
    ```
 
 CMake compiles the native libraries (`DasherCore`, `KenLM`) automatically as part of the Gradle build.
 
 ## Nightly builds
 
-`.github/workflows/nightly.yml` builds a release APK every night at 02:30 UTC if `master` changed since the previous nightly release, and publishes it as a pre-release tagged `nightly-YYYY-MM-DD`. Runs started by hand (Actions → Nightly APK build → Run workflow) are tagged `nightly-YYYY-MM-DD-X1`, `-X2`, … for that day.
+`.github/workflows/nightly.yml` builds a release APK every night at 02:30 UTC if `master` changed since the previous nightly release, and publishes it as a pre-release tagged `nightly-YYYY-MM-DD`. Runs started by hand (Actions → Nightly APK build → Run workflow) are tagged `nightly-YYYY-MM-DD-X1`, `-X2`, … for that day, as is a scheduled run whose tag is already taken.
 
-Nightly APKs are signed with the public test key in `keystore/`, so each installs over the previous one. To install one over a build signed with a different key, uninstall that build first.
+Nightly APKs are signed with the nightly key, so each installs over the previous one. To install one over a build signed with a different key, uninstall that build first.
+
+The key is not in the repository but in two repository secrets; until they are set, the workflow stops with an error. To create them once:
+
+```bash
+keytool -genkeypair -keystore nightly.jks -storetype PKCS12 -alias dasher-nightly \
+  -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=Dasher Mobile Nightly"
+base64 < nightly.jks | gh secret set NIGHTLY_KEYSTORE_BASE64
+gh secret set NIGHTLY_KEYSTORE_PASSWORD   # the password keytool asked for
+```
+
+Keep `nightly.jks` and its password somewhere safe outside the repository: a nightly signed with a new key does not install over the earlier ones. To sign a build locally as the workflow does, set `NIGHTLY_KEYSTORE_FILE` (the path of `nightly.jks`), `NIGHTLY_KEYSTORE_PASSWORD` and `NIGHTLY_KEY_ALIAS=dasher-nightly`, then run `./gradlew assembleRelease -Pnightly`.
