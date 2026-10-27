@@ -101,7 +101,7 @@ class DasherImeService : InputMethodService() {
         imeTextSink = DasherImeTextSink(
             inputConnectionProvider = { currentInputConnection },
             editorInfoProvider = { currentInputEditorInfo },
-            mayReadText = { allowsLearning(currentInputEditorInfo) }
+            mayReadText = { mayCheckText(currentInputEditorInfo) }
         )
         pendingStartupLanguage = restoredLanguage()
 
@@ -135,6 +135,9 @@ class DasherImeService : InputMethodService() {
                     DasherImeTextSink.Result.OUT_OF_SYNC -> {
                         DasherSessionCoordinator.requestPause(localHost)
                         loadTextBeforeCursor()
+                        // The editor may not have reported where its cursor now is; take the
+                        // position from the next report its text confirms.
+                        syncedCursor = -1
                     }
                     else -> Unit
                 }
@@ -556,13 +559,28 @@ class DasherImeService : InputMethodService() {
     private fun allowsLearning(info: EditorInfo?): Boolean {
         if (info == null) return true
         if ((info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0) return false
+        return !isPassword(info)
+    }
+
+    /**
+     * Returns `true` if the editor's text may be read to check what Dasher deletes.  That is no
+     * learning, so it is allowed where only learning is not, but never in password fields, and
+     * not in editors that hold no text (TYPE_NULL, e.g. terminals), which would return none.
+     */
+    private fun mayCheckText(info: EditorInfo?): Boolean {
+        if (info == null) return true
+        if ((info.inputType and InputType.TYPE_MASK_CLASS) == InputType.TYPE_NULL) return false
+        return !isPassword(info)
+    }
+
+    private fun isPassword(info: EditorInfo): Boolean {
         val variation = info.inputType and InputType.TYPE_MASK_VARIATION
         return when (info.inputType and InputType.TYPE_MASK_CLASS) {
-            InputType.TYPE_CLASS_TEXT -> variation != InputType.TYPE_TEXT_VARIATION_PASSWORD &&
-                variation != InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD &&
-                variation != InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD
-            InputType.TYPE_CLASS_NUMBER -> variation != InputType.TYPE_NUMBER_VARIATION_PASSWORD
-            else -> true
+            InputType.TYPE_CLASS_TEXT -> variation == InputType.TYPE_TEXT_VARIATION_PASSWORD ||
+                variation == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD ||
+                variation == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD
+            InputType.TYPE_CLASS_NUMBER -> variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            else -> false
         }
     }
 

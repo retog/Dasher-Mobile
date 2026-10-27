@@ -15,6 +15,9 @@ class DasherImeTextSinkTest {
     private class FakeEditor(inputType: Int, readable: Boolean = false) {
         val text = StringBuilder()
         var reads = 0
+        /** Characters beyond this length are dropped, like a length-limited field's. */
+        var maxLength = Int.MAX_VALUE
+        var allCaps = false
         val editorInfo = EditorInfo().apply { this.inputType = inputType }
         val connection = Proxy.newProxyInstance(
             InputConnection::class.java.classLoader,
@@ -23,7 +26,9 @@ class DasherImeTextSinkTest {
             when (method.name) {
                 "beginBatchEdit", "endBatchEdit" -> true
                 "commitText" -> {
-                    text.append(args[0] as CharSequence)
+                    val committed = (args[0] as CharSequence).toString()
+                    text.append(if (allCaps) committed.uppercase() else committed)
+                    if (text.length > maxLength) text.setLength(maxLength)
                     true
                 }
                 "deleteSurroundingText" -> {
@@ -111,6 +116,29 @@ class DasherImeTextSinkTest {
         assertEquals(DasherImeTextSink.Result.OUT_OF_SYNC, editor.sink.onTextChanged("sve"))
         assertEquals("ahoj", editor.text.toString())
         assertEquals("svet", editor.sink.committedText)
+    }
+
+    @Test
+    fun deletesNothingWhenOnlyTheDeletedCharacterHappensToMatch() {
+        val editor = FakeEditor(InputType.TYPE_CLASS_TEXT, readable = true)
+        editor.text.append("hello")
+        editor.maxLength = 5
+        editor.sink.resetTracking("hello")
+        editor.sink.onTextChanged("helloo")
+        assertEquals("hello", editor.text.toString())
+        // Reversing the dropped "o" must not delete the user's "o".
+        assertEquals(DasherImeTextSink.Result.OUT_OF_SYNC, editor.sink.onTextChanged("hello"))
+        assertEquals("hello", editor.text.toString())
+    }
+
+    @Test
+    fun reversesInAnEditorThatCapitalises() {
+        val editor = FakeEditor(InputType.TYPE_CLASS_TEXT, readable = true)
+        editor.allCaps = true
+        editor.sink.onTextChanged("ab")
+        assertEquals("AB", editor.text.toString())
+        assertEquals(DasherImeTextSink.Result.EDITED, editor.sink.onTextChanged("a"))
+        assertEquals("A", editor.text.toString())
     }
 
     @Test

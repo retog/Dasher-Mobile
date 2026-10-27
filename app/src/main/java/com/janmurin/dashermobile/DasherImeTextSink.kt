@@ -22,22 +22,29 @@ import android.view.inputmethod.InputConnection
  * reversing over one never deletes a character of the editor's text.
  *
  * ## Deleting
- * Where the editor's text may be read, the sink first checks that the text before the cursor is
- * the text it is about to delete.  If it is not (the user moved the cursor, or the editor dropped
- * a commit, e.g. at its length limit), it deletes nothing and reports [Result.OUT_OF_SYNC].
+ * Where the editor's text may be read, the sink first checks that the text before the cursor ends
+ * with what it is about to delete and up to [CHECKED_CONTEXT] characters before that, as it
+ * believes them.  If it does not (the user moved the cursor, or the editor dropped a commit, e.g.
+ * at its length limit), it deletes nothing and reports [Result.OUT_OF_SYNC].  Case and a web
+ * editor's non-breaking spaces are ignored, as editors rewrite them without moving the cursor.
  *
  * @param inputConnectionProvider Lazy getter for the current [InputConnection].  May return
  *   `null` if the connection is no longer valid.
  * @param editorInfoProvider       Lazy getter for the current [EditorInfo].  Used to tell
  *   whether the editor takes newlines.
- * @param mayReadText             Returns `true` if the editor's text may be read, i.e. it is not
- *   a password field or one that asks for no personalised learning.
+ * @param mayReadText             Returns `true` if the editor's text may be read to check what
+ *   is deleted: not in password fields, nor in editors that hold no text (terminals).
  */
 class DasherImeTextSink(
     private val inputConnectionProvider: () -> InputConnection?,
     private val editorInfoProvider: () -> EditorInfo?,
     private val mayReadText: () -> Boolean = { false }
 ) {
+    companion object {
+        /** Characters before the deleted ones that must match too, so a chance match is unlikely. */
+        const val CHECKED_CONTEXT = 24
+    }
+
     /** What [onTextChanged] did. */
     enum class Result {
         /** Nothing: the text is the last seen one, or there is no editor. */
@@ -99,8 +106,11 @@ class DasherImeTextSink(
         val commonPrefixLength = commonPrefixLength(lastText, text)
         val deletedText = committed(lastText.substring(commonPrefixLength))
         val insertedText = text.substring(commonPrefixLength)
-        if (deletedText.isNotEmpty() && mayReadText() && !endsWith(inputConnection, deletedText)) {
-            return Result.OUT_OF_SYNC
+        if (deletedText.isNotEmpty() && mayReadText()) {
+            val expected = committed(lastText).takeLast(deletedText.length + CHECKED_CONTEXT)
+            if (!endsWith(inputConnection, expected)) {
+                return Result.OUT_OF_SYNC
+            }
         }
 
         inputConnection.beginBatchEdit()
@@ -119,7 +129,7 @@ class DasherImeTextSink(
     private fun endsWith(inputConnection: InputConnection, expected: String): Boolean {
         val actual = inputConnection.getTextBeforeCursor(expected.length, 0)?.toString() ?: return false
         // Web editors hold a space typed last as a non-breaking one.
-        return actual.replace('\u00A0', ' ') == expected
+        return actual.replace('\u00A0', ' ').equals(expected, ignoreCase = true)
     }
 
     private fun commitInsertedText(inputConnection: InputConnection, insertedText: String) {
