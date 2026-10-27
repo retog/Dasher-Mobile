@@ -46,8 +46,13 @@ jobs:
           previous_tag=$(jq -r '[.[] | select((.draft | not) and (.tag_name | startswith("nightly-")))][0].tag_name // empty' <<< "$releases")
           echo "previous_tag=$previous_tag" >> "$GITHUB_OUTPUT"
           if [ -n "$previous_tag" ]; then
-            # A tag that no longer resolves to a commit counts as a change.
-            previous_sha=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${previous_tag}" --jq .sha) || previous_sha=""
+            # A tag that no longer resolves to a commit counts as a change; other errors stop the run.
+            lookup_error=$(mktemp)
+            if ! previous_sha=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${previous_tag}" --jq .sha 2> "$lookup_error"); then
+              cat "$lookup_error" >&2
+              grep -qE 'HTTP (404|422)' "$lookup_error" || exit 1
+              previous_sha=""
+            fi
             if [ "$previous_sha" = "$GITHUB_SHA" ]; then
               echo "No changes since ${previous_tag} (${previous_sha}) — skipping build."
               echo "should_build=false" >> "$GITHUB_OUTPUT"

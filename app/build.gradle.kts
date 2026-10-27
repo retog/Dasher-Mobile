@@ -48,7 +48,8 @@ android {
     if (nightly) {
         signingConfigs {
             create("nightly") {
-                storeFile = file(nightlySigning("NIGHTLY_KEYSTORE_FILE"))
+                // A relative path is taken from the repository root.
+                storeFile = rootProject.file(nightlySigning("NIGHTLY_KEYSTORE_FILE"))
                 storePassword = nightlySigning("NIGHTLY_KEYSTORE_PASSWORD")
                 keyAlias = nightlySigning("NIGHTLY_KEY_ALIAS")
                 // A PKCS12 keystore has one password for the store and its key.
