@@ -56,10 +56,10 @@ base64 < nightly.jks | gh secret set NIGHTLY_KEYSTORE_BASE64
 gh secret set NIGHTLY_KEYSTORE_PASSWORD   # the password keytool asked for
 ```
 
-Without Java, OpenSSL makes an equivalent keystore (on OpenSSL 1.1, use `-nodes` instead of `-noenc`):
+Without Java, OpenSSL (or macOS's LibreSSL) makes an equivalent keystore:
 
 ```bash
-openssl req -x509 -newkey rsa:4096 -sha256 -days 10000 -noenc \
+openssl req -x509 -newkey rsa:4096 -sha256 -days 10000 -nodes \
   -subj "/CN=Dasher Mobile Nightly" -keyout key.pem -out cert.pem
 openssl pkcs12 -export -inkey key.pem -in cert.pem -name dasher-nightly -out nightly.jks
 rm key.pem cert.pem
