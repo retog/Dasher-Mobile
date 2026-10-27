@@ -53,7 +53,7 @@ class DasherImeService : InputMethodService() {
         /** Lets a moving cursor (e.g. a dragged selection handle) settle before it is checked. */
         private const val CURSOR_SYNC_DELAY_MS = 150L
         /** Dasher's own edits whose cursor the editor may still report. */
-        private const val MAX_EXPECTED_CURSORS = 32
+        private const val MAX_EXPECTED_CURSORS = 128
     }
 
     private var hostHandle: DasherSessionCoordinator.HostHandle? = null
@@ -100,7 +100,8 @@ class DasherImeService : InputMethodService() {
         hostViews = views
         imeTextSink = DasherImeTextSink(
             inputConnectionProvider = { currentInputConnection },
-            editorInfoProvider = { currentInputEditorInfo }
+            editorInfoProvider = { currentInputEditorInfo },
+            mayReadText = { allowsLearning(currentInputEditorInfo) }
         )
         pendingStartupLanguage = restoredLanguage()
 
@@ -125,9 +126,17 @@ class DasherImeService : InputMethodService() {
             textConsumer = { text ->
                 views.outputView.text = text
                 val sink = imeTextSink
-                if (sink != null && sink.onTextChanged(text) && syncedCursor >= 0) {
-                    expectedCursors.addLast(expectedCursor(sink))
-                    if (expectedCursors.size > MAX_EXPECTED_CURSORS) expectedCursors.removeFirst()
+                when (sink?.onTextChanged(text)) {
+                    DasherImeTextSink.Result.EDITED -> if (syncedCursor >= 0) {
+                        expectedCursors.addLast(expectedCursor(sink))
+                        if (expectedCursors.size > MAX_EXPECTED_CURSORS) expectedCursors.removeFirst()
+                    }
+                    // Dasher was about to delete text the editor does not hold before its cursor.
+                    DasherImeTextSink.Result.OUT_OF_SYNC -> {
+                        DasherSessionCoordinator.requestPause(localHost)
+                        loadTextBeforeCursor()
+                    }
+                    else -> Unit
                 }
             },
             statusConsumer = { mode, paused ->

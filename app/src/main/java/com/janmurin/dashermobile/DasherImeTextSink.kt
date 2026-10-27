@@ -21,15 +21,33 @@ import android.view.inputmethod.InputConnection
  * web page may take as Send.)  Dropped newlines are left out when counting what to delete, so
  * reversing over one never deletes a character of the editor's text.
  *
+ * ## Deleting
+ * Where the editor's text may be read, the sink first checks that the text before the cursor is
+ * the text it is about to delete.  If it is not (the user moved the cursor, or the editor dropped
+ * a commit, e.g. at its length limit), it deletes nothing and reports [Result.OUT_OF_SYNC].
+ *
  * @param inputConnectionProvider Lazy getter for the current [InputConnection].  May return
  *   `null` if the connection is no longer valid.
  * @param editorInfoProvider       Lazy getter for the current [EditorInfo].  Used to tell
  *   whether the editor takes newlines.
+ * @param mayReadText             Returns `true` if the editor's text may be read, i.e. it is not
+ *   a password field or one that asks for no personalised learning.
  */
 class DasherImeTextSink(
     private val inputConnectionProvider: () -> InputConnection?,
-    private val editorInfoProvider: () -> EditorInfo?
+    private val editorInfoProvider: () -> EditorInfo?,
+    private val mayReadText: () -> Boolean = { false }
 ) {
+    /** What [onTextChanged] did. */
+    enum class Result {
+        /** Nothing: the text is the last seen one, or there is no editor. */
+        UNCHANGED,
+        /** The editor was edited. */
+        EDITED,
+        /** Nothing: the editor's text before its cursor is not the text Dasher would delete. */
+        OUT_OF_SYNC
+    }
+
     private var lastText: String = ""
 
     /**
@@ -49,7 +67,7 @@ class DasherImeTextSink(
      * newlines a single-line editor never received.
      */
     val committedText: String
-        get() = if (acceptsNewlines) lastText else lastText.replace("\n", "")
+        get() = committed(lastText)
 
     /**
      * `true` if the current editor takes newlines.  As in `TextView`, only a text editor with
@@ -71,28 +89,37 @@ class DasherImeTextSink(
      * last seen value.
      *
      * @param text The full output text produced by DasherCore so far in this session.
-     * @return `false` if [text] is the last seen value or there is no editor to edit.
      */
-    fun onTextChanged(text: String): Boolean {
+    fun onTextChanged(text: String): Result {
         if (text == lastText) {
-            return false
+            return Result.UNCHANGED
         }
 
-        val inputConnection = inputConnectionProvider() ?: return false
+        val inputConnection = inputConnectionProvider() ?: return Result.UNCHANGED
         val commonPrefixLength = commonPrefixLength(lastText, text)
-        val deleteCount = committedLength(lastText.substring(commonPrefixLength))
+        val deletedText = committed(lastText.substring(commonPrefixLength))
         val insertedText = text.substring(commonPrefixLength)
+        if (deletedText.isNotEmpty() && mayReadText() && !endsWith(inputConnection, deletedText)) {
+            return Result.OUT_OF_SYNC
+        }
 
         inputConnection.beginBatchEdit()
-        if (deleteCount > 0) {
-            inputConnection.deleteSurroundingText(deleteCount, 0)
+        if (deletedText.isNotEmpty()) {
+            inputConnection.deleteSurroundingText(deletedText.length, 0)
         }
         if (insertedText.isNotEmpty()) {
             commitInsertedText(inputConnection, insertedText)
         }
         inputConnection.endBatchEdit()
         lastText = text
-        return true
+        return Result.EDITED
+    }
+
+    /** Returns `true` if the editor's text before its cursor ends with [expected]. */
+    private fun endsWith(inputConnection: InputConnection, expected: String): Boolean {
+        val actual = inputConnection.getTextBeforeCursor(expected.length, 0)?.toString() ?: return false
+        // Web editors hold a space typed last as a non-breaking one.
+        return actual.replace('\u00A0', ' ') == expected
     }
 
     private fun commitInsertedText(inputConnection: InputConnection, insertedText: String) {
@@ -124,9 +151,9 @@ class DasherImeTextSink(
         flushChunk()
     }
 
-    /** Returns how many characters of [text] were committed, i.e. without dropped newlines. */
-    private fun committedLength(text: String): Int =
-        if (acceptsNewlines) text.length else text.count { it != '\n' }
+    /** Returns what of [text] the editor received, i.e. [text] without dropped newlines. */
+    private fun committed(text: String): String =
+        if (acceptsNewlines) text else text.replace("\n", "")
 
     private fun commonPrefixLength(left: String, right: String): Int {
         val max = minOf(left.length, right.length)

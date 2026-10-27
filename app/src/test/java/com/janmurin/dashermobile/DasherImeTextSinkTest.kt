@@ -12,8 +12,9 @@ import org.junit.Test
 class DasherImeTextSinkTest {
 
     /** An editor holding only the text before its cursor, edited through an [InputConnection]. */
-    private class FakeEditor(inputType: Int) {
+    private class FakeEditor(inputType: Int, readable: Boolean = false) {
         val text = StringBuilder()
+        var reads = 0
         val editorInfo = EditorInfo().apply { this.inputType = inputType }
         val connection = Proxy.newProxyInstance(
             InputConnection::class.java.classLoader,
@@ -29,10 +30,14 @@ class DasherImeTextSinkTest {
                     text.setLength(maxOf(0, text.length - args[0] as Int))
                     true
                 }
+                "getTextBeforeCursor" -> {
+                    reads++
+                    text.takeLast(args[0] as Int)
+                }
                 else -> throw UnsupportedOperationException(method.name)
             }
         } as InputConnection
-        val sink = DasherImeTextSink({ connection }, { editorInfo })
+        val sink = DasherImeTextSink({ connection }, { editorInfo }, { readable })
     }
 
     @Test
@@ -89,10 +94,40 @@ class DasherImeTextSinkTest {
     }
 
     @Test
-    fun reportsWhetherItEditedTheEditor() {
+    fun reportsWhatItDid() {
         val editor = FakeEditor(InputType.TYPE_CLASS_TEXT)
-        assertTrue(editor.sink.onTextChanged("a"))
-        assertFalse(editor.sink.onTextChanged("a"))
-        assertFalse(DasherImeTextSink({ null }, { null }).onTextChanged("a"))
+        assertEquals(DasherImeTextSink.Result.EDITED, editor.sink.onTextChanged("a"))
+        assertEquals(DasherImeTextSink.Result.UNCHANGED, editor.sink.onTextChanged("a"))
+        assertEquals(DasherImeTextSink.Result.UNCHANGED, DasherImeTextSink({ null }, { null }).onTextChanged("a"))
+    }
+
+    @Test
+    fun deletesNothingTheEditorDoesNotHoldBeforeItsCursor() {
+        val editor = FakeEditor(InputType.TYPE_CLASS_TEXT, readable = true)
+        editor.text.append("ahoj svet")
+        editor.sink.resetTracking("svet")
+        // The user moved the cursor: the editor now holds other text before it.
+        editor.text.setLength(4)
+        assertEquals(DasherImeTextSink.Result.OUT_OF_SYNC, editor.sink.onTextChanged("sve"))
+        assertEquals("ahoj", editor.text.toString())
+        assertEquals("svet", editor.sink.committedText)
+    }
+
+    @Test
+    fun takesANonBreakingSpaceForTheSpaceItTyped() {
+        val editor = FakeEditor(InputType.TYPE_CLASS_TEXT, readable = true)
+        editor.text.append("a\u00A0")
+        editor.sink.resetTracking("a ")
+        assertEquals(DasherImeTextSink.Result.EDITED, editor.sink.onTextChanged("a"))
+        assertEquals("a", editor.text.toString())
+    }
+
+    @Test
+    fun neverReadsAnEditorThatMustNotBeRead() {
+        val editor = FakeEditor(InputType.TYPE_CLASS_TEXT, readable = false)
+        editor.sink.onTextChanged("abc")
+        editor.sink.onTextChanged("a")
+        assertEquals("a", editor.text.toString())
+        assertEquals(0, editor.reads)
     }
 }
