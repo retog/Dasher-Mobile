@@ -56,4 +56,13 @@ base64 < nightly.jks | gh secret set NIGHTLY_KEYSTORE_BASE64
 gh secret set NIGHTLY_KEYSTORE_PASSWORD   # the password keytool asked for
 ```
 
+Without Java, OpenSSL makes an equivalent keystore (on OpenSSL 1.1, use `-nodes` instead of `-noenc`):
+
+```bash
+openssl req -x509 -newkey rsa:4096 -sha256 -days 10000 -noenc \
+  -subj "/CN=Dasher Mobile Nightly" -keyout key.pem -out cert.pem
+openssl pkcs12 -export -inkey key.pem -in cert.pem -name dasher-nightly -out nightly.jks
+rm key.pem cert.pem
+```
+
 Keep `nightly.jks` and its password somewhere safe outside the repository: a nightly signed with a new key does not install over the earlier ones. To sign a build locally as the workflow does, set `NIGHTLY_KEYSTORE_FILE` (the path of `nightly.jks`), `NIGHTLY_KEYSTORE_PASSWORD` and `NIGHTLY_KEY_ALIAS=dasher-nightly`, then run `./gradlew assembleRelease -Pnightly`.
