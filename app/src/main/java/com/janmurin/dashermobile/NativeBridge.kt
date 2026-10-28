@@ -130,6 +130,17 @@ class NativeBridge {
         @JvmStatic external fun nativeSetLearningEnabled(handle: Long, enabled: Boolean)
 
         /**
+         * Loads the text before an editor's cursor as if it had been written with Dasher, so
+         * the next boxes are sized exactly as if the user had just written it.  It is not
+         * learned, and only the part after the last character the alphabet lacks is kept.
+         *
+         * @param handle           Opaque session handle.
+         * @param textBeforeCursor Plain text before the cursor.
+         * @return The text actually loaded, which is the new output text.
+         */
+        @JvmStatic external fun nativeSetContext(handle: Long, textBeforeCursor: String): String
+
+        /**
          * Returns the identifier of the currently active Dasher alphabet
          * (e.g. `"English with limited punctuation"`, `"Slovak"`).
          *

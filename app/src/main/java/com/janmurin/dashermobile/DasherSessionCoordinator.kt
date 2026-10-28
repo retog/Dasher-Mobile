@@ -374,6 +374,18 @@ object DasherSessionCoordinator {
     }
 
     /**
+     * Loads the text before an editor's cursor into the engine if [host] is active.
+     *
+     * @return The text actually loaded, or `null` if [host] is not active.
+     */
+    fun setContext(host: HostHandle, textBeforeCursor: String): String? {
+        synchronized(lock) {
+            if (activeHostId != host.id) return null
+            return engine?.setContext(textBeforeCursor)
+        }
+    }
+
+    /**
      * Attempts to switch the input mode on the engine if [host] is active.
      *
      * @return `true` if the switch succeeded.

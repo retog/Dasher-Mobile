@@ -21,26 +21,93 @@ import android.view.inputmethod.InputConnection
  * web page may take as Send.)  Dropped newlines are left out when counting what to delete, so
  * reversing over one never deletes a character of the editor's text.
  *
+ * ## Deleting
+ * Where the editor's text may be read, the sink first checks that the text before the cursor ends
+ * with what it is about to delete and up to [CHECKED_CONTEXT] characters before that, as it
+ * believes them: its own text, and before it the editor text read when the engine was loaded.
+ * If it does not (the user moved the cursor, or the editor dropped a commit, e.g. at its length
+ * limit), it deletes nothing and reports [Result.OUT_OF_SYNC].  Case and the characters
+ * [asTyped] maps are ignored, as editors rewrite them without moving the cursor.
+ *
  * @param inputConnectionProvider Lazy getter for the current [InputConnection].  May return
  *   `null` if the connection is no longer valid.
  * @param editorInfoProvider       Lazy getter for the current [EditorInfo].  Used to tell
  *   whether the editor takes newlines.
+ * @param mayReadText             Returns `true` if the editor's text may be read to check what
+ *   is deleted: not in password fields, nor in editors that hold no text (terminals).
  */
 class DasherImeTextSink(
     private val inputConnectionProvider: () -> InputConnection?,
-    private val editorInfoProvider: () -> EditorInfo?
+    private val editorInfoProvider: () -> EditorInfo?,
+    private val mayReadText: () -> Boolean = { false }
 ) {
+    companion object {
+        /** Characters before the deleted ones that must match too, so a chance match is unlikely. */
+        const val CHECKED_CONTEXT = 24
+
+        /**
+         * Returns editor text as Dasher would have typed it: web editors hold a space typed last
+         * as a non-breaking one, and some editors turn quotes into typographic ones (English
+         * ‘ ’ “ ”, or Slovak and German ‚ „).  Each character maps to one, so lengths are kept.
+         */
+        fun asTyped(text: String): String = text
+            .replace('\u00A0', ' ')
+            .replace('\u2018', '\'')
+            .replace('\u2019', '\'')
+            .replace('\u201A', '\'')
+            .replace('\u201B', '\'')
+            .replace('\u201C', '"')
+            .replace('\u201D', '"')
+            .replace('\u201E', '"')
+            .replace('\u201F', '"')
+    }
+
+    /** What [onTextChanged] did. */
+    enum class Result {
+        /** Nothing: the text is the last seen one, or there is no editor. */
+        UNCHANGED,
+        /** The editor was edited. */
+        EDITED,
+        /** Nothing: the editor's text before its cursor is not the text Dasher would delete. */
+        OUT_OF_SYNC
+    }
+
     private var lastText: String = ""
+    /** Editor text before [lastText], read but not loaded into the engine; checked when deleting. */
+    private var textBefore: String = ""
 
     /**
      * Resets the internal "last known text" snapshot.
      *
      * Should be called whenever the IME attaches to a new editor field so that the next
-     * [onTextChanged] call computes its diff against an empty baseline.
+     * [onTextChanged] call computes its diff against [baseline].
+     *
+     * @param baseline   Text already before the cursor that the engine was loaded with.
+     * @param textBefore Editor text before [baseline] that was read but not loaded.
      */
-    fun resetTracking() {
-        lastText = ""
+    fun resetTracking(baseline: String = "", textBefore: String = "") {
+        lastText = baseline
+        this.textBefore = textBefore
     }
+
+    /**
+     * The text the editor is believed to hold before its cursor: the output text without the
+     * newlines a single-line editor never received.
+     */
+    val committedText: String
+        get() = committed(lastText)
+
+    /**
+     * `true` if the current editor takes newlines.  As in `TextView`, only a text editor with
+     * [InputType.TYPE_TEXT_FLAG_MULTI_LINE] does; [InputType.TYPE_TEXT_FLAG_IME_MULTI_LINE] marks
+     * a single-line editor.
+     */
+    val acceptsNewlines: Boolean
+        get() {
+            val inputType = editorInfoProvider()?.inputType ?: 0
+            val mask = InputType.TYPE_MASK_CLASS or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            return (inputType and mask) == (InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE)
+        }
 
     /**
      * Called each time DasherCore's output buffer changes.
@@ -51,25 +118,38 @@ class DasherImeTextSink(
      *
      * @param text The full output text produced by DasherCore so far in this session.
      */
-    fun onTextChanged(text: String) {
+    fun onTextChanged(text: String): Result {
         if (text == lastText) {
-            return
+            return Result.UNCHANGED
         }
 
-        val inputConnection = inputConnectionProvider() ?: return
+        val inputConnection = inputConnectionProvider() ?: return Result.UNCHANGED
         val commonPrefixLength = commonPrefixLength(lastText, text)
-        val deleteCount = committedLength(lastText.substring(commonPrefixLength))
+        val deletedText = committed(lastText.substring(commonPrefixLength))
         val insertedText = text.substring(commonPrefixLength)
+        if (deletedText.isNotEmpty() && mayReadText()) {
+            val expected = (textBefore + committed(lastText)).takeLast(deletedText.length + CHECKED_CONTEXT)
+            if (!endsWith(inputConnection, expected)) {
+                return Result.OUT_OF_SYNC
+            }
+        }
 
         inputConnection.beginBatchEdit()
-        if (deleteCount > 0) {
-            inputConnection.deleteSurroundingText(deleteCount, 0)
+        if (deletedText.isNotEmpty()) {
+            inputConnection.deleteSurroundingText(deletedText.length, 0)
         }
         if (insertedText.isNotEmpty()) {
             commitInsertedText(inputConnection, insertedText)
         }
         inputConnection.endBatchEdit()
         lastText = text
+        return Result.EDITED
+    }
+
+    /** Returns `true` if the editor's text before its cursor ends with [expected]. */
+    private fun endsWith(inputConnection: InputConnection, expected: String): Boolean {
+        val actual = inputConnection.getTextBeforeCursor(expected.length, 0)?.toString() ?: return false
+        return asTyped(actual).equals(asTyped(expected), ignoreCase = true)
     }
 
     private fun commitInsertedText(inputConnection: InputConnection, insertedText: String) {
@@ -90,7 +170,7 @@ class DasherImeTextSink(
                 }
                 '\n' -> {
                     flushChunk()
-                    if (isMultiline()) {
+                    if (acceptsNewlines) {
                         inputConnection.commitText("\n", 1)
                     }
                 }
@@ -101,20 +181,9 @@ class DasherImeTextSink(
         flushChunk()
     }
 
-    /**
-     * Returns `true` if the current editor takes newlines.  As in `TextView`, only a text editor
-     * with [InputType.TYPE_TEXT_FLAG_MULTI_LINE] does; [InputType.TYPE_TEXT_FLAG_IME_MULTI_LINE]
-     * marks a single-line editor.
-     */
-    private fun isMultiline(): Boolean {
-        val inputType = editorInfoProvider()?.inputType ?: 0
-        val mask = InputType.TYPE_MASK_CLASS or InputType.TYPE_TEXT_FLAG_MULTI_LINE
-        return (inputType and mask) == (InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE)
-    }
-
-    /** Returns how many characters of [text] were committed, i.e. without dropped newlines. */
-    private fun committedLength(text: String): Int =
-        if (isMultiline()) text.length else text.count { it != '\n' }
+    /** Returns what of [text] the editor received, i.e. [text] without dropped newlines. */
+    private fun committed(text: String): String =
+        if (acceptsNewlines) text else text.replace("\n", "")
 
     private fun commonPrefixLength(left: String, right: String): Int {
         val max = minOf(left.length, right.length)

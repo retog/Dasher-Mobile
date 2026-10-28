@@ -32,6 +32,7 @@
     <string name="icon_ime_size">IME size</string>
     <string name="icon_movement_speed">Movement speed</string>
     <string name="icon_info">Project info</string>
+    <string name="icon_locate_cursor">Continue at cursor</string>
     <string name="kenlm_missing_file_warning">KenLM file for selected language was not found.</string>
     <string name="kenlm_import_file">Import file</string>
     <string name="kenlm_import_success">KenLM file imported.</string>

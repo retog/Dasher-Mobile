@@ -44,6 +44,8 @@ import com.janmurin.dashermobile.R
  * @property settingsButton       Button that opens [com.janmurin.dashermobile.SettingsActivity]; `null` in IME mode.
  * @property canvasFrame          [android.widget.FrameLayout] that wraps [canvasView] and any overlay views.
  * @property canvasCalibrateButton Calibrate button overlaid on the canvas (visible in TILT+paused state).
+ * @property locateButton         Button overlaid on the canvas that moves Dasher to the editor's
+ *                                cursor; `null` outside IME mode.
  */
 data class DasherHostViews(
     val root: View,
@@ -56,7 +58,8 @@ data class DasherHostViews(
     val languageModelSpinner: Spinner?,
     val settingsButton: View?,
     val canvasFrame: FrameLayout,
-    val canvasCalibrateButton: Button
+    val canvasCalibrateButton: Button,
+    val locateButton: ImageView?
 )
 
 /**
@@ -244,6 +247,28 @@ object DasherHostUi {
         }
         canvasFrame.addView(canvasCalibrateButton)
 
+        val locateButton = if (hostMode == HostMode.IME) {
+            ImageView(context).apply {
+                setImageResource(R.drawable.my_location_24px)
+                setColorFilter(0xFFFFFFFF.toInt())
+                background = ResourcesCompat.getDrawable(context.resources, R.drawable.button_background, null)
+                contentDescription = context.getString(R.string.icon_locate_cursor)
+                val padding = dp(10)
+                setPadding(padding, padding, padding, padding)
+                layoutParams = FrameLayout.LayoutParams(dp(44), dp(44)).apply {
+                    gravity = Gravity.TOP or Gravity.START
+                    val margin = dp(12)
+                    topMargin = margin
+                    leftMargin = margin
+                }
+                isClickable = true
+                isFocusable = true
+                visibility = View.GONE
+            }.also(canvasFrame::addView)
+        } else {
+            null
+        }
+
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFF000000.toInt())
@@ -373,7 +398,8 @@ object DasherHostUi {
             languageModelSpinner = languageModelSpinner,
             settingsButton = settingsIcon,
             canvasFrame = canvasFrame,
-            canvasCalibrateButton = canvasCalibrateButton
+            canvasCalibrateButton = canvasCalibrateButton,
+            locateButton = locateButton
         )
     }
 }

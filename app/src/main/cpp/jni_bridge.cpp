@@ -550,6 +550,31 @@ Java_com_janmurin_dashermobile_NativeBridge_nativeFlushTrainingText(JNIEnv *,
     session->iface->FlushTrainingText();
 }
 
+/**
+ * @brief JNI binding for @c NativeBridge.nativeSetContext.
+ *
+ * Loads the text before an editor's cursor as if it had been written with Dasher.
+ *
+ * @return The plain text actually loaded (the new output text).
+ */
+JNIEXPORT jstring JNICALL
+Java_com_janmurin_dashermobile_NativeBridge_nativeSetContext(JNIEnv *env,
+                                                               jclass,
+                                                               jlong handle,
+                                                               jstring textBeforeCursor) {
+    auto *session = fromHandle(handle);
+    if (!session || !session->iface || !textBeforeCursor) {
+        return env->NewStringUTF("");
+    }
+    const char *chars = env->GetStringUTFChars(textBeforeCursor, nullptr);
+    if (!chars) {
+        return env->NewStringUTF("");
+    }
+    const std::string text(chars);
+    env->ReleaseStringUTFChars(textBeforeCursor, chars);
+    return env->NewStringUTF(session->iface->SetContext(text).c_str());
+}
+
 /** @brief JNI binding for @c NativeBridge.nativeSetLearningEnabled. Turns learning from written text on or off. */
 JNIEXPORT void JNICALL
 Java_com_janmurin_dashermobile_NativeBridge_nativeSetLearningEnabled(JNIEnv *,

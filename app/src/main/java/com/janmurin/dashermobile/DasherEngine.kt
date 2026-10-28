@@ -402,6 +402,17 @@ class DasherEngine(
     }
 
     /**
+     * Loads the text before an editor's cursor; see [NativeBridge.nativeSetContext].
+     *
+     * @return The text actually loaded, or `null` if the engine is destroyed.
+     */
+    fun setContext(textBeforeCursor: String): String? {
+        if (destroyed || nativeHandle == 0L) return null
+        hasBootstrapFrame = false
+        return NativeBridge.nativeSetContext(nativeHandle, textBeforeCursor)
+    }
+
+    /**
      * Returns the [DasherLanguage] currently active in the native session.
      *
      * Falls back to [DasherLanguage.ENGLISH] when the engine is destroyed.
