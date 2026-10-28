@@ -146,10 +146,10 @@ class DasherImeTextSinkTest {
     @Test
     fun takesTypographicQuotesForTheQuotesItTyped() {
         val editor = FakeEditor(InputType.TYPE_CLASS_TEXT, readable = true)
-        editor.text.append("say \u201Chi\u201D")
-        editor.sink.resetTracking("say \"hi\"")
-        assertEquals(DasherImeTextSink.Result.EDITED, editor.sink.onTextChanged("say \"hi"))
-        assertEquals("say \u201Chi", editor.text.toString())
+        editor.text.append("say \u201Chi\u201D, \u201Eahoj\u201C")
+        editor.sink.resetTracking("say \"hi\", \"ahoj\"")
+        assertEquals(DasherImeTextSink.Result.EDITED, editor.sink.onTextChanged("say \"hi\", \"aho"))
+        assertEquals("say \u201Chi\u201D, \u201Eaho", editor.text.toString())
     }
 
     @Test

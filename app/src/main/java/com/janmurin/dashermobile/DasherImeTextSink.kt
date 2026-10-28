@@ -47,14 +47,19 @@ class DasherImeTextSink(
 
         /**
          * Returns editor text as Dasher would have typed it: web editors hold a space typed last
-         * as a non-breaking one, and some editors turn quotes into typographic ones.
+         * as a non-breaking one, and some editors turn quotes into typographic ones (English
+         * ‘ ’ “ ”, or Slovak and German ‚ „).  Each character maps to one, so lengths are kept.
          */
         fun asTyped(text: String): String = text
             .replace('\u00A0', ' ')
             .replace('\u2018', '\'')
             .replace('\u2019', '\'')
+            .replace('\u201A', '\'')
+            .replace('\u201B', '\'')
             .replace('\u201C', '"')
             .replace('\u201D', '"')
+            .replace('\u201E', '"')
+            .replace('\u201F', '"')
     }
 
     /** What [onTextChanged] did. */
