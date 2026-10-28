@@ -24,9 +24,10 @@ import android.view.inputmethod.InputConnection
  * ## Deleting
  * Where the editor's text may be read, the sink first checks that the text before the cursor ends
  * with what it is about to delete and up to [CHECKED_CONTEXT] characters before that, as it
- * believes them.  If it does not (the user moved the cursor, or the editor dropped a commit, e.g.
- * at its length limit), it deletes nothing and reports [Result.OUT_OF_SYNC].  Case and a web
- * editor's non-breaking spaces are ignored, as editors rewrite them without moving the cursor.
+ * believes them: its own text, and before it the editor text read when the engine was loaded.
+ * If it does not (the user moved the cursor, or the editor dropped a commit, e.g. at its length
+ * limit), it deletes nothing and reports [Result.OUT_OF_SYNC].  Case and the characters
+ * [asTyped] maps are ignored, as editors rewrite them without moving the cursor.
  *
  * @param inputConnectionProvider Lazy getter for the current [InputConnection].  May return
  *   `null` if the connection is no longer valid.
@@ -43,6 +44,17 @@ class DasherImeTextSink(
     companion object {
         /** Characters before the deleted ones that must match too, so a chance match is unlikely. */
         const val CHECKED_CONTEXT = 24
+
+        /**
+         * Returns editor text as Dasher would have typed it: web editors hold a space typed last
+         * as a non-breaking one, and some editors turn quotes into typographic ones.
+         */
+        fun asTyped(text: String): String = text
+            .replace('\u00A0', ' ')
+            .replace('\u2018', '\'')
+            .replace('\u2019', '\'')
+            .replace('\u201C', '"')
+            .replace('\u201D', '"')
     }
 
     /** What [onTextChanged] did. */
@@ -56,6 +68,8 @@ class DasherImeTextSink(
     }
 
     private var lastText: String = ""
+    /** Editor text before [lastText], read but not loaded into the engine; checked when deleting. */
+    private var textBefore: String = ""
 
     /**
      * Resets the internal "last known text" snapshot.
@@ -63,10 +77,12 @@ class DasherImeTextSink(
      * Should be called whenever the IME attaches to a new editor field so that the next
      * [onTextChanged] call computes its diff against [baseline].
      *
-     * @param baseline Text already before the cursor that the engine was loaded with.
+     * @param baseline   Text already before the cursor that the engine was loaded with.
+     * @param textBefore Editor text before [baseline] that was read but not loaded.
      */
-    fun resetTracking(baseline: String = "") {
+    fun resetTracking(baseline: String = "", textBefore: String = "") {
         lastText = baseline
+        this.textBefore = textBefore
     }
 
     /**
@@ -107,7 +123,7 @@ class DasherImeTextSink(
         val deletedText = committed(lastText.substring(commonPrefixLength))
         val insertedText = text.substring(commonPrefixLength)
         if (deletedText.isNotEmpty() && mayReadText()) {
-            val expected = committed(lastText).takeLast(deletedText.length + CHECKED_CONTEXT)
+            val expected = (textBefore + committed(lastText)).takeLast(deletedText.length + CHECKED_CONTEXT)
             if (!endsWith(inputConnection, expected)) {
                 return Result.OUT_OF_SYNC
             }
@@ -128,8 +144,7 @@ class DasherImeTextSink(
     /** Returns `true` if the editor's text before its cursor ends with [expected]. */
     private fun endsWith(inputConnection: InputConnection, expected: String): Boolean {
         val actual = inputConnection.getTextBeforeCursor(expected.length, 0)?.toString() ?: return false
-        // Web editors hold a space typed last as a non-breaking one.
-        return actual.replace('\u00A0', ' ').equals(expected, ignoreCase = true)
+        return asTyped(actual).equals(asTyped(expected), ignoreCase = true)
     }
 
     private fun commitInsertedText(inputConnection: InputConnection, insertedText: String) {

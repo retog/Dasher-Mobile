@@ -473,14 +473,14 @@ class DasherImeService : InputMethodService() {
     /**
      * Loads the text before the cursor again if the editor's cursor is not where Dasher left it,
      * because the user moved it or selected text.  Text before the cursor that is what Dasher
-     * believes confirms a cursor whose position alone was not conclusive.  In editors that must
-     * not be learned from, the text is never read, and a moved cursor starts an empty text.
+     * believes confirms a cursor whose position alone was not conclusive.  In password fields the
+     * text is never read, and a moved cursor starts an empty text.
      * Editors that report no positions are never checked; the locate button reloads there.
      */
     private fun checkCursor() {
         val sink = imeTextSink ?: return
         if (!isInputViewActive || selectionStart < 0 || isCursorWhereDasherLeftIt(sink)) return
-        if (allowsLearning(currentInputEditorInfo) && textBeforeCursorMatches(sink)) {
+        if (mayCheckText(currentInputEditorInfo) && textBeforeCursorMatches(sink)) {
             rememberCursor(sink)
             return
         }
@@ -509,11 +509,15 @@ class DasherImeService : InputMethodService() {
     /** Returns `true` if the editor's text before its cursor is what Dasher believes it is. */
     private fun textBeforeCursorMatches(sink: DasherImeTextSink): Boolean {
         val raw = textBeforeCursor()
-        val before = raw.takeLast(MAX_CONTEXT_CHARS)
+        val before = DasherImeTextSink.asTyped(raw.takeLast(MAX_CONTEXT_CHARS))
         val expected = (contextOutsideEngine + sink.committedText).takeLast(MAX_CONTEXT_CHARS)
         // Dasher does not know the editor's text before the window it was loaded from.
         val partial = loadedWindowWasFull || raw.length > MAX_CONTEXT_CHARS
-        return if (partial) before.endsWith(expected) else before == expected
+        return if (partial) {
+            before.endsWith(expected, ignoreCase = true)
+        } else {
+            before.equals(expected, ignoreCase = true)
+        }
     }
 
     /**
@@ -528,25 +532,32 @@ class DasherImeService : InputMethodService() {
      * text had been written with it, and makes it the sink's baseline.
      *
      * Runs only while the keyboard is shown and Dasher is paused.  Nothing is loaded in editors
-     * that must not be learned from.
+     * that must not be learned from; their text is still read where [mayCheckText] allows, so
+     * the sink can check what Dasher deletes.
      */
     private fun loadTextBeforeCursor() {
         val localHost = hostHandle ?: return
         val sink = imeTextSink ?: return
         if (!isInputViewActive || !DasherSessionCoordinator.isPaused()) return
-        val raw = if (allowsLearning(currentInputEditorInfo)) textBeforeCursor() else ""
-        val before = raw.takeLast(MAX_CONTEXT_CHARS)
+        val info = currentInputEditorInfo
+        val learning = allowsLearning(info)
+        val raw = if (mayCheckText(info)) textBeforeCursor() else ""
+        val before = DasherImeTextSink.asTyped(raw.takeLast(MAX_CONTEXT_CHARS))
         // The engine keeps only the text after the last character it cannot read back, such as
         // '\r'.  Cut there too at line breaks the sink would not delete in a single-line editor,
         // and at a "\r\n" whose '\r' the window left out.
-        var text = if (sink.acceptsNewlines) before else before.replace('\n', '\r')
-        if (raw.length > MAX_CONTEXT_CHARS && raw.startsWith("\r\n")) {
+        var text = when {
+            !learning -> ""
+            sink.acceptsNewlines -> before
+            else -> before.replace('\n', '\r')
+        }
+        if (learning && raw.length > MAX_CONTEXT_CHARS && raw.startsWith("\r\n")) {
             text = "\r$text"
         }
         val loaded = DasherSessionCoordinator.setContext(localHost, text) ?: return
         contextOutsideEngine = if (before.endsWith(loaded)) before.dropLast(loaded.length) else before
         loadedWindowWasFull = raw.length > MAX_CONTEXT_CHARS
-        sink.resetTracking(loaded)
+        sink.resetTracking(loaded, contextOutsideEngine)
         rememberCursor(sink)
         expectedCursors.clear()
         hostViews?.outputView?.text = loaded

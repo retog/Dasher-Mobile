@@ -132,6 +132,27 @@ class DasherImeTextSinkTest {
     }
 
     @Test
+    fun checksTheEditorTextReadBeforeTheLoadedText() {
+        val editor = FakeEditor(InputType.TYPE_CLASS_TEXT, readable = true)
+        editor.text.append("Room 7 is free, room 9 is free")
+        // Loading was cut at the digit; the text before it was read but not loaded.
+        editor.sink.resetTracking(" is free", textBefore = "Room 7 is free, room 9")
+        // The user moved the cursor after "Room 7 is free".
+        editor.text.setLength(14)
+        assertEquals(DasherImeTextSink.Result.OUT_OF_SYNC, editor.sink.onTextChanged(" is fre"))
+        assertEquals("Room 7 is free", editor.text.toString())
+    }
+
+    @Test
+    fun takesTypographicQuotesForTheQuotesItTyped() {
+        val editor = FakeEditor(InputType.TYPE_CLASS_TEXT, readable = true)
+        editor.text.append("say \u201Chi\u201D")
+        editor.sink.resetTracking("say \"hi\"")
+        assertEquals(DasherImeTextSink.Result.EDITED, editor.sink.onTextChanged("say \"hi"))
+        assertEquals("say \u201Chi", editor.text.toString())
+    }
+
+    @Test
     fun reversesInAnEditorThatCapitalises() {
         val editor = FakeEditor(InputType.TYPE_CLASS_TEXT, readable = true)
         editor.allCaps = true
