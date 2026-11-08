@@ -15,6 +15,11 @@
     <string name="settings_input_mode">Input mode</string>
     <string name="settings_ime_size">IME size</string>
     <string name="settings_movement_speed">Movement speed</string>
+    <string name="settings_keyboard">Keyboard</string>
+    <string name="keyboard_off">Off: tap to turn Dasher on in Android\'s keyboard settings</string>
+    <string name="keyboard_on">On: tap to choose Dasher as the keyboard</string>
+    <string name="keyboard_current">In use: tap to choose another keyboard</string>
+    <string name="keyboard_banner">Dasher is not on as a keyboard yet. Tap here to turn it on in Android\'s keyboard settings.</string>
     <string name="input_mode_touch">Touch</string>
     <string name="input_mode_tilt">Tilt</string>
     <string name="input_mode_tilt_unavailable">Tilt (unavailable)</string>
@@ -31,6 +36,7 @@
     <string name="icon_input_mode">Input mode</string>
     <string name="icon_ime_size">IME size</string>
     <string name="icon_movement_speed">Movement speed</string>
+    <string name="icon_keyboard">Keyboard</string>
     <string name="icon_info">Project info</string>
     <string name="icon_locate_cursor">Continue at cursor</string>
     <string name="kenlm_missing_file_warning">KenLM file for selected language was not found.</string>
