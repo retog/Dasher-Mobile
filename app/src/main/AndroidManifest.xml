@@ -24,9 +24,10 @@
             </intent-filter>
         </activity>
 
+        <!-- Exported so that Android's keyboard settings can open it (see res/xml/dasher_ime.xml). -->
         <activity
             android:name=".SettingsActivity"
-            android:exported="false"
+            android:exported="true"
             android:theme="@style/Theme.DasherMobile" />
 
         <service

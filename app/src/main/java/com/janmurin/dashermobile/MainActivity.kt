@@ -32,11 +32,14 @@ import com.janmurin.dashermobile.ui.DasherHostUi
  * - Startup tilt restore: if the user last closed the app in tilt mode the activity will
  *   automatically switch back to tilt and calibrate after the surface is ready.
  * - Opens [SettingsActivity] when the settings button is tapped.
+ * - While Dasher is not turned on as the system keyboard, shows a banner that starts setting it
+ *   up ([DasherKeyboard]).
  */
 class MainActivity : ComponentActivity() {
 
     private var hostHandle: DasherSessionCoordinator.HostHandle? = null
     private lateinit var canvasView: DasherCanvasView
+    private var keyboardBanner: View? = null
     private var tiltProvider: TiltInputProvider? = null
     private var isResumed = false
     private var suppressModeSwitchCallback = false
@@ -111,6 +114,9 @@ class MainActivity : ComponentActivity() {
             hostHandle?.let { DasherSessionCoordinator.requestPause(it) }
             startActivity(Intent(this, SettingsActivity::class.java))
         }
+        keyboardBanner = hostViews.keyboardBanner
+        keyboardBanner?.setOnClickListener { DasherKeyboard.setUp(this) }
+        updateKeyboardBanner()
         enableEdgeToEdge()
 
         val localHost = hostHandle
@@ -269,6 +275,19 @@ class MainActivity : ComponentActivity() {
         if (DasherSessionCoordinator.getInputMode() == InputMode.TILT && !DasherSessionCoordinator.isPaused()) {
             tiltProvider?.register()
         }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) return
+        // Back from Android's keyboard settings or keyboard chooser, or from SettingsActivity.
+        updateKeyboardBanner()
+        DasherKeyboard.onWindowFocused(this)
+    }
+
+    private fun updateKeyboardBanner() {
+        val off = DasherKeyboard.state(this) == DasherKeyboard.State.OFF
+        keyboardBanner?.visibility = if (off) View.VISIBLE else View.GONE
     }
 
     override fun onPause() {

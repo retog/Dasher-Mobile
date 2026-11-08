@@ -46,6 +46,8 @@ import com.janmurin.dashermobile.R
  * @property canvasCalibrateButton Calibrate button overlaid on the canvas (visible in TILT+paused state).
  * @property locateButton         Button overlaid on the canvas that moves Dasher to the editor's
  *                                cursor; `null` outside IME mode.
+ * @property keyboardBanner       Hidden banner below the top bar, for setting up Dasher as the
+ *                                system keyboard; `null` outside APP mode.
  */
 data class DasherHostViews(
     val root: View,
@@ -59,7 +61,8 @@ data class DasherHostViews(
     val settingsButton: View?,
     val canvasFrame: FrameLayout,
     val canvasCalibrateButton: Button,
-    val locateButton: ImageView?
+    val locateButton: ImageView?,
+    val keyboardBanner: TextView?
 )
 
 /**
@@ -280,6 +283,7 @@ object DasherHostUi {
         }
 
         var settingsIcon: ImageView? = null
+        var keyboardBanner: TextView? = null
         if (hostMode == HostMode.APP) {
             val topBar = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -319,6 +323,25 @@ object DasherHostUi {
             topBar.addView(titleView)
             topBar.addView(settingsIcon)
             root.addView(topBar)
+
+            keyboardBanner = TextView(context).apply {
+                text = context.getString(R.string.keyboard_banner)
+                setTextColor(0xFF000000.toInt())
+                setBackgroundColor(0xFFE3E3E3.toInt())
+                textSize = 14f
+                typeface = ResourcesCompat.getFont(context, R.font.inter_italic)
+                setPadding(dp(16), dp(10), dp(16), dp(10))
+                isClickable = true
+                isFocusable = true
+                visibility = View.GONE
+            }
+            root.addView(
+                keyboardBanner,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
         }
 
         if (hostMode == HostMode.APP) {
@@ -399,7 +422,8 @@ object DasherHostUi {
             settingsButton = settingsIcon,
             canvasFrame = canvasFrame,
             canvasCalibrateButton = canvasCalibrateButton,
-            locateButton = locateButton
+            locateButton = locateButton,
+            keyboardBanner = keyboardBanner
         )
     }
 }

@@ -13,9 +13,17 @@ class SettingsActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             DasherMobileTheme {
-                SettingsScreen(onBack = { finish() })
+                SettingsScreen(
+                    onBack = { finish() },
+                    onKeyboardSetUp = { DasherKeyboard.setUp(this) }
+                )
             }
         }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) DasherKeyboard.onWindowFocused(this)
     }
 }
 
