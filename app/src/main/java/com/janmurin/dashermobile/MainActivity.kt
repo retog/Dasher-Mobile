@@ -8,6 +8,7 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.core.content.res.ResourcesCompat
@@ -42,6 +43,11 @@ class MainActivity : ComponentActivity() {
     private var suppressModeSwitchCallback = false
     private var startupModeApplied = false
     private var pendingStartupTiltRestore = false
+    private var voiceInput: VoiceInput? = null
+    private var outputView: TextView? = null
+    /** Dictated text the engine could not take in (see [appendDictation]); shown before its text. */
+    private var textOutsideEngine = ""
+    private var engineText = ""
 
     private fun updateKeepScreenOn(mode: InputMode) {
         if (mode == InputMode.TILT) {
@@ -75,13 +81,11 @@ class MainActivity : ComponentActivity() {
         val version = NativeBridge.nativeVersion()
         Log.i("DasherMobile", "JNI loaded: $version")
 
-        val restoredLanguage = DasherPrefs.getLanguage(this)
-        var pendingStartupLanguage: DasherLanguage? = restoredLanguage
-
-        hostHandle = DasherSessionCoordinator.registerHost(filesDir.absolutePath, assets)
+        hostHandle = DasherSessionCoordinator.registerHost(filesDir.absolutePath, assets, languagesPref())
         val hostViews = DasherHostUi.create(this, HostMode.APP)
         canvasView = hostViews.canvasView
         val textView = hostViews.outputView
+        outputView = textView
         val statusView = hostViews.statusView
         val modeSwitch = requireNotNull(hostViews.modeSwitch)
         val calibrateButton = requireNotNull(hostViews.calibrateButton)
@@ -128,13 +132,20 @@ class MainActivity : ComponentActivity() {
             DasherSessionCoordinator.updateHostCallbacks(
                 host = localHost,
                 frameConsumer = { commands, strings -> canvasView.submitFrame(commands, strings) },
-                textConsumer = { text -> textView.text = text },
+                textConsumer = { text ->
+                    engineText = text
+                    textView.text = textOutsideEngine + text
+                },
                 statusConsumer = { mode, paused ->
                     val modeLabel = if (mode == InputMode.TILT) "TILT" else "TOUCH"
                     val stateLabel = if (paused) "PAUSED" else "RUNNING"
                     statusView.text = getString(R.string.status_label, modeLabel, stateLabel)
-                    canvasView.showPauseOverlay = paused
-                    pausedView.visibility = if (paused) View.VISIBLE else View.GONE
+                    // Moving by spoken letters, the engine is paused between two letters only.
+                    val showPaused = paused && voiceInput?.mode != VoiceMode.LETTERS
+                    canvasView.showPauseOverlay = showPaused
+                    pausedView.visibility = if (showPaused) View.VISIBLE else View.GONE
+                    hostViews.dictationButton.visibility = if (paused) View.VISIBLE else View.GONE
+                    hostViews.lettersButton.visibility = if (paused) View.VISIBLE else View.GONE
                     val showCanvasCalibrateButton = paused && mode == InputMode.TILT
                     canvasCalibrateButton.visibility = if (showCanvasCalibrateButton) View.VISIBLE else View.GONE
                     canvasCalibrateButton.isEnabled = showCanvasCalibrateButton
@@ -154,11 +165,6 @@ class MainActivity : ComponentActivity() {
 
             canvasView.onSurfaceSizeChanged = { width, height ->
                 DasherSessionCoordinator.onSurfaceSizeChanged(localHost, width, height)
-                val startupLanguage = pendingStartupLanguage
-                if (startupLanguage != null && DasherSessionCoordinator.setLanguage(localHost, startupLanguage)) {
-                    pendingStartupLanguage = null
-                    DasherPrefs.setLanguage(this, startupLanguage)
-                }
             }
             canvasView.onTouchInput = { action, x, y ->
                 DasherSessionCoordinator.onTouch(localHost, action, x, y)
@@ -170,8 +176,52 @@ class MainActivity : ComponentActivity() {
             }
 
             textView.setOnClickListener {
+                textOutsideEngine = ""
                 DasherSessionCoordinator.resetOutputText(localHost)
             }
+
+            val voice = VoiceInput(this, object : VoiceInput.Listener {
+                override fun onVoiceModeChanged(mode: VoiceMode?) {
+                    hostViews.showVoiceMode(mode)
+                    val showPaused = DasherSessionCoordinator.isPaused() && mode != VoiceMode.LETTERS
+                    canvasView.showPauseOverlay = showPaused
+                    canvasView.invalidate()
+                    pausedView.visibility = if (showPaused) View.VISIBLE else View.GONE
+                    if (mode != VoiceMode.LETTERS) {
+                        DasherSessionCoordinator.cancelSteering(localHost)
+                    }
+                }
+
+                override fun onVoiceHeard(mode: VoiceMode, alternatives: List<String>, language: DasherLanguage) {
+                    if (!isResumed) return
+                    when (mode) {
+                        VoiceMode.DICTATION -> appendDictation(localHost, alternatives.first())
+                        VoiceMode.LETTERS -> DasherSessionCoordinator.steer(
+                            localHost,
+                            SpokenLetters.parse(alternatives, language)
+                        )
+                    }
+                }
+
+                override fun onVoicePermissionNeeded() {
+                    VoicePermissionActivity.open(this@MainActivity)
+                }
+
+                override fun onVoiceUnavailable() {
+                    Toast.makeText(this@MainActivity, R.string.voice_unavailable, Toast.LENGTH_SHORT).show()
+                }
+            })
+            voiceInput = voice
+
+            fun toggleVoice(mode: VoiceMode) {
+                if (voice.mode == mode) {
+                    voice.stop()
+                } else {
+                    voice.start(mode, VoiceInput.languageFor(DasherPrefs.getLanguages(this)))
+                }
+            }
+            hostViews.dictationButton.setOnClickListener { toggleVoice(VoiceMode.DICTATION) }
+            hostViews.lettersButton.setOnClickListener { toggleVoice(VoiceMode.LETTERS) }
 
             modeSwitch.setOnCheckedChangeListener { _, checked ->
                 if (suppressModeSwitchCallback) {
@@ -215,11 +265,6 @@ class MainActivity : ComponentActivity() {
 
             if (canvasView.width > 0 && canvasView.height > 0) {
                 DasherSessionCoordinator.onSurfaceSizeChanged(localHost, canvasView.width, canvasView.height)
-                val startupLanguage = pendingStartupLanguage
-                if (startupLanguage != null && DasherSessionCoordinator.setLanguage(localHost, startupLanguage)) {
-                    pendingStartupLanguage = null
-                    DasherPrefs.setLanguage(this, startupLanguage)
-                }
             }
         } else {
             Log.e("DasherMobile", "Failed to initialize native engine")
@@ -234,12 +279,13 @@ class MainActivity : ComponentActivity() {
         val localHost = hostHandle
         updateKeepScreenOn(DasherSessionCoordinator.getInputMode())
         if (localHost != null) {
-            DasherSessionCoordinator.activateHost(localHost)
-
-            val prefLanguage = DasherPrefs.getLanguage(this)
-            if (prefLanguage != DasherSessionCoordinator.getLanguage()) {
-                DasherSessionCoordinator.setLanguage(localHost, prefLanguage)
+            // Languages are chosen in the settings; a changed choice takes a fresh engine,
+            // which starts with an empty text.
+            if (DasherSessionCoordinator.activateHost(localHost, languagesPref())) {
+                textOutsideEngine = ""
+                outputView?.text = engineText
             }
+
             val prefModel = DasherPrefs.getLanguageModel(this)
             if (prefModel != DasherSessionCoordinator.getLanguageModel()) {
                 DasherSessionCoordinator.setLanguageModel(localHost, prefModel)
@@ -272,6 +318,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        voiceInput?.stop()
         tiltProvider?.unregister()
         hostHandle?.let {
             DasherSessionCoordinator.clearTiltInput(it)
@@ -283,10 +330,33 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        voiceInput?.destroy()
+        voiceInput = null
         tiltProvider?.unregister()
         tiltProvider = null
         hostHandle?.let { DasherSessionCoordinator.unregisterHost(it) }
         hostHandle = null
         super.onDestroy()
+    }
+
+    private fun languagesPref(): String = DasherLanguage.formatSet(DasherPrefs.getLanguages(this))
+
+    /**
+     * Appends dictated text to the text written so far, after a space if it follows a word,
+     * and has Dasher continue behind it.  Its words count for the personal dictionary like
+     * written ones.
+     *
+     * The engine only takes in text it could have written itself; of text with other characters
+     * (digits, say) it keeps the part after the last of them.  The rest is kept in
+     * [textOutsideEngine] and shown before the engine's text.
+     */
+    private fun appendDictation(localHost: DasherSessionCoordinator.HostHandle, text: String) {
+        DasherSessionCoordinator.requestPause(localHost)
+        val written = textOutsideEngine + engineText
+        val separator = if (written.isNotEmpty() && !written.last().isWhitespace()) " " else ""
+        val all = written + separator + text
+        val loaded = DasherSessionCoordinator.setContext(localHost, all) ?: return
+        textOutsideEngine = if (all.endsWith(loaded)) all.dropLast(loaded.length) else all
+        NativeBridge.nativeDictionaryLearn(filesDir.absolutePath, text, DasherSessionCoordinator.getLanguages())
     }
 }

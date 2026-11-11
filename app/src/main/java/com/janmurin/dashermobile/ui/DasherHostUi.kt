@@ -23,6 +23,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
 import com.janmurin.dashermobile.HostMode
 import com.janmurin.dashermobile.R
+import com.janmurin.dashermobile.VoiceMode
 
 /**
  * Aggregates all live [android.view.View] references that make up a Dasher host UI.
@@ -39,13 +40,16 @@ import com.janmurin.dashermobile.R
  * @property modeSwitch           Toggle switch between TOUCH and TILT input; `null` in compact mode
  *                                when the host does not expose tilt controls.
  * @property calibrateButton      Button to calibrate the tilt baseline; `null` when not applicable.
- * @property languageSpinner      Spinner for selecting the active [com.janmurin.dashermobile.DasherLanguage]; may be `null`.
  * @property languageModelSpinner Spinner for selecting the [com.janmurin.dashermobile.LanguageModel]; may be `null`.
  * @property settingsButton       Button that opens [com.janmurin.dashermobile.SettingsActivity]; `null` in IME mode.
  * @property canvasFrame          [android.widget.FrameLayout] that wraps [canvasView] and any overlay views.
  * @property canvasCalibrateButton Calibrate button overlaid on the canvas (visible in TILT+paused state).
  * @property locateButton         Button overlaid on the canvas that moves Dasher to the editor's
  *                                cursor; `null` outside IME mode.
+ * @property dictationButton      Button overlaid on the canvas that switches dictation on and off
+ *                                ([com.janmurin.dashermobile.VoiceMode.DICTATION]).
+ * @property lettersButton        Button overlaid on the canvas that switches moving by spoken
+ *                                letters on and off ([com.janmurin.dashermobile.VoiceMode.LETTERS]).
  */
 data class DasherHostViews(
     val root: View,
@@ -54,13 +58,28 @@ data class DasherHostViews(
     val statusView: TextView,
     val modeSwitch: SwitchCompat?,
     val calibrateButton: Button?,
-    val languageSpinner: Spinner?,
     val languageModelSpinner: Spinner?,
     val settingsButton: View?,
     val canvasFrame: FrameLayout,
     val canvasCalibrateButton: Button,
-    val locateButton: ImageView?
-)
+    val locateButton: ImageView?,
+    val dictationButton: ImageView,
+    val lettersButton: ImageView
+) {
+    /**
+     * Shows which voice mode is on, by the colour of its button.
+     *
+     * @param mode The mode that is on, or `null` if none is.
+     */
+    fun showVoiceMode(mode: VoiceMode?) {
+        dictationButton.setBackgroundResource(
+            if (mode == VoiceMode.DICTATION) R.drawable.button_background_active else R.drawable.button_background
+        )
+        lettersButton.setBackgroundResource(
+            if (mode == VoiceMode.LETTERS) R.drawable.button_background_active else R.drawable.button_background
+        )
+    }
+}
 
 /**
  * Factory object that programmatically builds the complete Dasher host UI.
@@ -176,7 +195,6 @@ object DasherHostUi {
             visibility = View.GONE
         }
 
-        var languageSpinner: Spinner? = null
         var languageModelSpinner: Spinner? = null
 
         if (hostMode.isCompact) {
@@ -189,17 +207,11 @@ object DasherHostUi {
                 )
             }
 
-            languageSpinner = Spinner(context).apply {
-                minimumWidth = dp(84)
-                layoutParams = controlLp()
-            }
             languageModelSpinner = Spinner(context).apply {
                 minimumWidth = dp(72)
                 layoutParams = controlLp()
             }
 
-            row2.addView(label(R.string.language))
-            row2.addView(languageSpinner)
             row2.addView(label(R.string.language_model))
             row2.addView(languageModelSpinner)
             controls.addView(row2)
@@ -268,6 +280,27 @@ object DasherHostUi {
         } else {
             null
         }
+
+        // The two voice buttons sit in the canvas's top right corner, one below the other.
+        fun voiceButton(iconRes: Int, descriptionRes: Int, row: Int): ImageView = ImageView(context).apply {
+            setImageResource(iconRes)
+            setColorFilter(0xFFFFFFFF.toInt())
+            background = ResourcesCompat.getDrawable(context.resources, R.drawable.button_background, null)
+            contentDescription = context.getString(descriptionRes)
+            val padding = dp(10)
+            setPadding(padding, padding, padding, padding)
+            layoutParams = FrameLayout.LayoutParams(dp(44), dp(44)).apply {
+                gravity = Gravity.TOP or Gravity.END
+                val margin = dp(12)
+                topMargin = margin + row * dp(52)
+                rightMargin = margin
+            }
+            isClickable = true
+            isFocusable = true
+        }.also(canvasFrame::addView)
+
+        val dictationButton = voiceButton(R.drawable.mic_24px, R.string.icon_voice_dictation, 0)
+        val lettersButton = voiceButton(R.drawable.mic_letters_24px, R.string.icon_voice_letters, 1)
 
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -394,12 +427,13 @@ object DasherHostUi {
             statusView = statusView,
             modeSwitch = modeSwitch,
             calibrateButton = calibrateButton,
-            languageSpinner = languageSpinner,
             languageModelSpinner = languageModelSpinner,
             settingsButton = settingsIcon,
             canvasFrame = canvasFrame,
             canvasCalibrateButton = canvasCalibrateButton,
-            locateButton = locateButton
+            locateButton = locateButton,
+            dictationButton = dictationButton,
+            lettersButton = lettersButton
         )
     }
 }

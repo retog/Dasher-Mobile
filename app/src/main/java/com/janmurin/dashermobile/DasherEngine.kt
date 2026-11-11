@@ -2,6 +2,7 @@ package com.janmurin.dashermobile
 
 import android.util.Log
 import android.view.Choreographer
+import java.util.Locale
 
 /**
  * Describes the physical input mechanism the user employs to drive the Dasher cursor.
@@ -47,32 +48,45 @@ enum class LanguageModel(val id: Int) {
 }
 
 /**
- * Maps a human-readable Dasher language to its alphabet identifier string and the serialised
- * preference value used in [DasherPrefs].
+ * A language Dasher can predict for.  Any number of them can be active at once: the letters
+ * of all of them are offered, sized by a language model trained on text of all of them.
  *
- * @property alphabetId Alphabet identifier consumed by [NativeBridge.nativeSetAlphabetId].
- * @property preferenceValue Short locale tag persisted in SharedPreferences.
+ * The native layer generates the alphabet for a set of languages and knows the same codes
+ * (`LanguageSet.cpp`).
+ *
+ * @property code Language code, used in preferences, file names and speech recognition.
  */
-enum class DasherLanguage(val alphabetId: String, val preferenceValue: String) {
-    ENGLISH("English with limited punctuation", "en"),
-    SLOVAK("Slovak", "sk");
+enum class DasherLanguage(val code: String) {
+    GERMAN("de"),
+    ENGLISH("en"),
+    SPANISH("es"),
+    FRENCH("fr"),
+    ITALIAN("it"),
+    SLOVAK("sk");
+
+    /** The language's name in the device's language, e.g. "Deutsch" or "German". */
+    val label: String
+        get() {
+            val name = Locale(code).getDisplayLanguage(Locale.getDefault())
+            return name.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+        }
 
     companion object {
-        /**
-         * Returns the [DasherLanguage] whose [alphabetId] matches [alphabetId],
-         * or [ENGLISH] if no match is found.
-         */
-        fun fromAlphabetId(alphabetId: String): DasherLanguage {
-            return values().firstOrNull { it.alphabetId == alphabetId } ?: ENGLISH
-        }
+        /** The languages used when none is chosen. */
+        val default: Set<DasherLanguage> = setOf(ENGLISH)
 
         /**
-         * Returns the [DasherLanguage] whose [preferenceValue] matches [value],
-         * or [ENGLISH] if no match is found.
+         * Reads a language set written by [formatSet].  Unknown codes are ignored; if no known
+         * code is left the result is [default].
          */
-        fun fromPreferenceValue(value: String?): DasherLanguage {
-            return values().firstOrNull { it.preferenceValue == value } ?: ENGLISH
+        fun parseSet(value: String?): Set<DasherLanguage> {
+            val codes = value.orEmpty().split('+', ',', ' ').toSet()
+            return values().filter { it.code in codes }.toSet().ifEmpty { default }
         }
+
+        /** Writes a language set as its codes in alphabetical order joined by `+`: `"de+en"`. */
+        fun formatSet(languages: Set<DasherLanguage>): String =
+            languages.ifEmpty { default }.map { it.code }.sorted().joinToString("+")
     }
 }
 
@@ -111,6 +125,10 @@ class DasherEngine(
     private var isPaused = true
     private var isTouching = false
     private var tiltActive = false
+
+    /** Whether a move started by [steer] is under way; frames are rendered meanwhile. */
+    private var steering = false
+    private val steerQueue = ArrayDeque<String>()
 
     /**
      * Callback invoked whenever the accumulated output text changes.
@@ -241,6 +259,7 @@ class DasherEngine(
         when (inputMode) {
             InputMode.TOUCH -> when (action) {
                 0 -> {
+                    cancelSteering()
                     resumeTouchIfNeeded()
                     isTouching = true
                     NativeBridge.nativeTouch(nativeHandle, 0, x, y)
@@ -344,7 +363,7 @@ class DasherEngine(
      */
     override fun doFrame(frameTimeNanos: Long) {
         if (!running) return
-        val shouldRenderFrame = !isPaused || !hasBootstrapFrame
+        val shouldRenderFrame = !isPaused || !hasBootstrapFrame || steering
         if (!destroyed && nativeHandle != 0L && hasSurface && shouldRenderFrame) {
             val frameTimeMs = frameTimeNanos / 1_000_000L
             val commands = NativeBridge.nativeFrame(nativeHandle, frameTimeMs)
@@ -366,6 +385,13 @@ class DasherEngine(
             }
 
             onTextUpdate?.invoke(NativeBridge.nativeGetOutputText(nativeHandle))
+
+            if (steering && !NativeBridge.nativeIsSteering(nativeHandle)) {
+                steering = false
+                // Show the boxes as the move left them, then go on to the next symbol.
+                hasBootstrapFrame = false
+                steerNext()
+            }
         }
         if (running) {
             choreographer.postFrameCallback(this)
@@ -379,6 +405,8 @@ class DasherEngine(
      */
     fun resetOutputText() {
         if (destroyed || nativeHandle == 0L) return
+        cancelSteering()
+        hasBootstrapFrame = false
         NativeBridge.nativeResetOutputText(nativeHandle)
     }
 
@@ -408,36 +436,54 @@ class DasherEngine(
      */
     fun setContext(textBeforeCursor: String): String? {
         if (destroyed || nativeHandle == 0L) return null
+        cancelSteering()
         hasBootstrapFrame = false
         return NativeBridge.nativeSetContext(nativeHandle, textBeforeCursor)
     }
 
     /**
-     * Returns the [DasherLanguage] currently active in the native session.
-     *
-     * Falls back to [DasherLanguage.ENGLISH] when the engine is destroyed.
+     * Returns the languages the native session predicts for, as written by
+     * [DasherLanguage.formatSet].  They are fixed when the session is created.
      */
-    fun getLanguage(): DasherLanguage {
-        if (destroyed || nativeHandle == 0L) return DasherLanguage.ENGLISH
-        return DasherLanguage.fromAlphabetId(NativeBridge.nativeGetAlphabetId(nativeHandle))
+    fun getLanguages(): String {
+        if (destroyed || nativeHandle == 0L) return ""
+        return NativeBridge.nativeGetLanguages(nativeHandle)
     }
 
     /**
-     * Attempts to switch the Dasher alphabet / language.
+     * Moves into the boxes of the given symbols one after the other, which writes them, as
+     * if the user had steered there.  Used for spoken letters.
      *
-     * The change is only applied while the engine is paused.
+     * The engine stays paused while it moves; the symbols are added to those still waiting
+     * from earlier calls.  A touch on the canvas ends the moves.
      *
-     * @param language The desired [DasherLanguage].
-     * @return `true` if the change was applied, `false` if the engine is running or destroyed.
+     * @param symbols What each symbol types (a letter, a punctuation mark, `" "`, `"\n"`),
+     *   or [STEER_BACK] to move back out of the symbol written last, deleting it.  Symbols
+     *   the alphabet lacks are skipped.
      */
-    fun setLanguage(language: DasherLanguage): Boolean {
-        if (destroyed || nativeHandle == 0L) return false
-        if (!isPaused) return false
-        if (NativeBridge.nativeGetAlphabetId(nativeHandle) != language.alphabetId) {
-            NativeBridge.nativeSetAlphabetId(nativeHandle, language.alphabetId)
+    fun steer(symbols: List<String>) {
+        if (destroyed || nativeHandle == 0L || !hasSurface || !isPaused) return
+        steerQueue.addAll(symbols)
+        if (!steering) steerNext()
+    }
+
+    /**
+     * Drops the symbols waiting to be steered to.  A move under way is finished, unless a
+     * touch or a new text ends it: the native side stops it then.
+     */
+    fun cancelSteering() {
+        steerQueue.clear()
+    }
+
+    private fun steerNext() {
+        while (!steering && steerQueue.isNotEmpty()) {
+            val symbol = steerQueue.removeFirst()
+            steering = if (symbol == STEER_BACK) {
+                NativeBridge.nativeSteerBack(nativeHandle)
+            } else {
+                NativeBridge.nativeSteerToSymbol(nativeHandle, symbol)
+            }
         }
-        hasBootstrapFrame = false
-        return true
     }
 
     /**
@@ -503,4 +549,9 @@ class DasherEngine(
 
     private fun currentX(): Float = surfaceWidth * 0.5f
     private fun currentY(): Float = surfaceHeight * 0.5f
+
+    companion object {
+        /** Given to [steer] in place of a symbol: move back out of the symbol written last. */
+        const val STEER_BACK = "\b"
+    }
 }

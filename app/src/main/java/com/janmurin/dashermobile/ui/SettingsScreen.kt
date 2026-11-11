@@ -59,7 +59,9 @@ import com.janmurin.dashermobile.KenlmModelFiles
 import com.janmurin.dashermobile.DasherPrefs
 import com.janmurin.dashermobile.InputMode
 import com.janmurin.dashermobile.LanguageModel
+import com.janmurin.dashermobile.PersonalDictionary
 import com.janmurin.dashermobile.R
+import com.janmurin.dashermobile.TrainingTexts
 
 val Inter = FontFamily(
     Font(R.font.inter_semibold_italic, FontWeight.SemiBold, FontStyle.Italic)
@@ -74,7 +76,8 @@ val InterItalic = FontFamily(
 fun SettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val projectUrl = "https://github.com/janmurin2/Dasher-Mobile/"
-    var selectedLanguage by remember { mutableStateOf(DasherPrefs.getLanguage(context)) }
+    var selectedLanguages by remember { mutableStateOf(DasherPrefs.getLanguages(context)) }
+    val selectedLanguageSet = DasherLanguage.formatSet(selectedLanguages)
     var selectedLanguageModel by remember { mutableStateOf(DasherPrefs.getLanguageModel(context)) }
     var selectedInputMode by remember { mutableStateOf(DasherPrefs.getInputMode(context)) }
     var selectedImeHeightPercent by remember { mutableStateOf(DasherPrefs.getImeHeightPercent(context)) }
@@ -85,30 +88,46 @@ fun SettingsScreen(onBack: () -> Unit) {
     var showInputModeDialog by remember { mutableStateOf(false) }
     var showImeHeightDialog by remember { mutableStateOf(false) }
     var showMovementSpeedDialog by remember { mutableStateOf(false) }
-    var hasKenlmModelForLanguage by remember { mutableStateOf(KenlmModelFiles.hasModel(context, selectedLanguage)) }
+    var showTrainingTextsDialog by remember { mutableStateOf(false) }
+    var showDictionaryDialog by remember { mutableStateOf(false) }
+    var dictionarySize by remember { mutableStateOf(PersonalDictionary.entries(context).size) }
+    var hasKenlmModelForLanguage by remember { mutableStateOf(KenlmModelFiles.hasModel(context, selectedLanguageSet)) }
 
     val importKenlmLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-        val imported = KenlmModelFiles.importModel(context, selectedLanguage, uri)
-        hasKenlmModelForLanguage = KenlmModelFiles.hasModel(context, selectedLanguage)
-        val messageRes = if (imported) R.string.kenlm_import_success else R.string.kenlm_import_failure
-        Toast.makeText(context, context.getString(messageRes), Toast.LENGTH_SHORT).show()
+        val imported = KenlmModelFiles.importModel(context, selectedLanguageSet, uri)
+        hasKenlmModelForLanguage = KenlmModelFiles.hasModel(context, selectedLanguageSet)
+        val message = if (imported) {
+            context.getString(R.string.kenlm_import_success)
+        } else {
+            context.getString(
+                R.string.kenlm_import_failure,
+                KenlmModelFiles.expectedFileNames(selectedLanguageSet).first()
+            )
+        }
+        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
     }
 
     LaunchedEffect(Unit) {
-        selectedLanguage = DasherPrefs.getLanguage(context)
+        selectedLanguages = DasherPrefs.getLanguages(context)
         selectedLanguageModel = DasherPrefs.getLanguageModel(context)
         selectedInputMode = DasherPrefs.getInputMode(context)
         selectedImeHeightPercent = DasherPrefs.getImeHeightPercent(context)
         selectedMovementSpeedPercent = DasherPrefs.getMovementSpeedPercent(context)
-        hasKenlmModelForLanguage = KenlmModelFiles.hasModel(context, selectedLanguage)
+        hasKenlmModelForLanguage = KenlmModelFiles.hasModel(context, selectedLanguageSet)
     }
 
-    LaunchedEffect(selectedLanguage, selectedLanguageModel) {
-        hasKenlmModelForLanguage = KenlmModelFiles.hasModel(context, selectedLanguage)
+    LaunchedEffect(selectedLanguageSet, selectedLanguageModel) {
+        hasKenlmModelForLanguage = KenlmModelFiles.hasModel(context, selectedLanguageSet)
     }
+
+    val trainingTextSources = mapOf(
+        TrainingTexts.Source.BUNDLED to stringResource(id = R.string.training_text_bundled),
+        TrainingTexts.Source.IMPORTED to stringResource(id = R.string.training_text_imported),
+        TrainingTexts.Source.NONE to stringResource(id = R.string.training_text_none)
+    )
 
     val showKenlmMissingWarning = selectedLanguageModel == LanguageModel.KENLM && !hasKenlmModelForLanguage
 
@@ -176,8 +195,27 @@ fun SettingsScreen(onBack: () -> Unit) {
                 iconResId = R.drawable.language_24px,
                 iconContentDescription = stringResource(id = R.string.icon_language),
                 title = stringResource(id = R.string.settings_language),
-                currentValue = if (selectedLanguage == DasherLanguage.SLOVAK) "Slovak" else "English",
+                currentValue = languageNames(selectedLanguages),
                 onClick = { showLanguageDialog = true }
+            )
+            HorizontalDivider(color = Color.Black, thickness = 1.dp)
+            SettingRow(
+                iconResId = R.drawable.save_24px,
+                iconContentDescription = stringResource(id = R.string.icon_training_texts),
+                title = stringResource(id = R.string.settings_training_texts),
+                currentValue = selectedLanguages.sortedBy { it.code }.joinToString(", ") { language ->
+                    val source = trainingTextSources.getValue(TrainingTexts.source(context, language))
+                    "${language.label}: ${source.lowercase()}"
+                },
+                onClick = { showTrainingTextsDialog = true }
+            )
+            HorizontalDivider(color = Color.Black, thickness = 1.dp)
+            SettingRow(
+                iconResId = R.drawable.book_24px,
+                iconContentDescription = stringResource(id = R.string.icon_personal_dictionary),
+                title = stringResource(id = R.string.settings_personal_dictionary),
+                currentValue = stringResource(id = R.string.dictionary_summary, dictionarySize),
+                onClick = { showDictionaryDialog = true }
             )
             HorizontalDivider(color = Color.Black, thickness = 1.dp)
             SettingRow(
@@ -215,13 +253,30 @@ fun SettingsScreen(onBack: () -> Unit) {
     }
 
     if (showLanguageDialog) {
-        LanguageDialog(
-            currentLanguage = selectedLanguage,
+        LanguagesDialog(
+            current = selectedLanguages,
             onDismiss = { showLanguageDialog = false },
-            onSelect = { language ->
-                DasherPrefs.setLanguage(context, language)
-                selectedLanguage = language
+            onConfirm = { languages ->
+                DasherPrefs.setLanguages(context, languages)
+                selectedLanguages = languages
                 showLanguageDialog = false
+            }
+        )
+    }
+
+    if (showTrainingTextsDialog) {
+        TrainingTextsDialog(
+            languages = selectedLanguages,
+            onDismiss = { showTrainingTextsDialog = false }
+        )
+    }
+
+    if (showDictionaryDialog) {
+        PersonalDictionaryDialog(
+            languages = selectedLanguages,
+            onDismiss = {
+                dictionarySize = PersonalDictionary.entries(context).size
+                showDictionaryDialog = false
             }
         )
     }
@@ -344,44 +399,6 @@ private fun SettingRow(
             )
         }
     }
-}
-
-@Composable
-private fun LanguageDialog(
-    currentLanguage: DasherLanguage,
-    onDismiss: () -> Unit,
-    onSelect: (DasherLanguage) -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(text = stringResource(id = R.string.select_language)) },
-        text = {
-            Column {
-                val languages = listOf(DasherLanguage.ENGLISH, DasherLanguage.SLOVAK)
-                languages.forEach { language ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelect(language) }
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = currentLanguage == language,
-                            onClick = { onSelect(language) }
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = if (language == DasherLanguage.SLOVAK) "Slovak" else "English")
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(text = stringResource(id = R.string.cancel))
-            }
-        }
-    )
 }
 
 @Composable

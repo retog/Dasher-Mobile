@@ -26,10 +26,14 @@ class NativeBridge {
          *
          * @param filesDir Absolute path to the application's private files directory.
          *   DasherCore writes its XML settings file here.
+         * @param languages The languages to predict for, as written by
+         *   [DasherLanguage.formatSet] (e.g. `"de+en"`).  They decide the alphabet and the text
+         *   the language model is trained on, and stay the same for the life of the session.
+         *   Only one session may exist at a time.
          * @return An opaque handle (non-zero on success, zero on failure) that must be
          *   passed to every subsequent native call and eventually to [nativeDestroy].
          */
-        @JvmStatic external fun nativeCreate(filesDir: String): Long
+        @JvmStatic external fun nativeCreate(filesDir: String, languages: String): Long
 
         /**
          * Releases all native resources associated with [handle].
@@ -141,20 +145,20 @@ class NativeBridge {
         @JvmStatic external fun nativeSetContext(handle: Long, textBeforeCursor: String): String
 
         /**
-         * Returns the identifier of the currently active Dasher alphabet
-         * (e.g. `"English with limited punctuation"`, `"Slovak"`).
+         * Returns the languages the session predicts for, as given to [nativeCreate] but
+         * in canonical form: known codes only, in alphabetical order, joined by `+`.
          *
          * @param handle Opaque session handle.
          */
-        @JvmStatic external fun nativeGetAlphabetId(handle: Long): String
+        @JvmStatic external fun nativeGetLanguages(handle: Long): String
 
         /**
-         * Switches the Dasher alphabet.  The change takes effect on the next [nativeFrame] call.
+         * Returns the identifier of the DasherCore alphabet generated for a set of languages.
+         * KenLM model files are named after it (see [KenlmModelFiles]).
          *
-         * @param handle     Opaque session handle.
-         * @param alphabetId Dasher alphabet identifier string.
+         * @param languages Language set as written by [DasherLanguage.formatSet].
          */
-        @JvmStatic external fun nativeSetAlphabetId(handle: Long, alphabetId: String)
+        @JvmStatic external fun nativeAlphabetIdFor(languages: String): String
 
         /**
          * Returns the numeric ID of the active language model.
@@ -186,5 +190,83 @@ class NativeBridge {
          * @param percent Speed percentage; valid values are 50–400.
          */
         @JvmStatic external fun nativeSetMovementSpeedPercent(handle: Long, percent: Int)
+
+        /**
+         * Returns the name of the training text bundled for a language, a file under the
+         * `training` assets directory; empty if none is bundled.
+         *
+         * @param language A [DasherLanguage.code].
+         */
+        @JvmStatic external fun nativeCorpusAssetFor(language: String): String
+
+        /**
+         * Returns the name of the file, in the private files directory, that a session reads
+         * as a language's imported training text.
+         *
+         * @param language A [DasherLanguage.code].
+         */
+        @JvmStatic external fun nativeImportedCorpusFileFor(language: String): String
+
+        /**
+         * Starts moving into the box of a symbol, as if the user had steered there: over the
+         * next frames the view scrolls level with the box and zooms into it, which writes the
+         * symbol.  Used for spoken letters.  Call [nativeFrame] until [nativeIsSteering]
+         * returns `false`; a touch cancels the move.
+         *
+         * @param handle Opaque session handle.
+         * @param text   What the symbol types: a letter, a punctuation mark, `" "` or `"\n"`.
+         * @return `false` if the alphabet has no such symbol.
+         */
+        @JvmStatic external fun nativeSteerToSymbol(handle: Long, text: String): Boolean
+
+        /**
+         * Starts moving back out of the box of the symbol written last, which deletes it.
+         *
+         * @param handle Opaque session handle.
+         * @return `false` if the session holds no written symbol to move out of.
+         */
+        @JvmStatic external fun nativeSteerBack(handle: Long): Boolean
+
+        /**
+         * Whether a move started by [nativeSteerToSymbol] or [nativeSteerBack] is under way.
+         *
+         * @param handle Opaque session handle.
+         */
+        @JvmStatic external fun nativeIsSteering(handle: Long): Boolean
+
+        /**
+         * Lists the personal dictionary, the most often written entries first.
+         *
+         * @param filesDir The application's private files directory.
+         * @return One string per entry: count, `1` if added by hand else `0`, language set
+         *   (empty for every language) and text, separated by tabs.
+         */
+        @JvmStatic external fun nativeDictionaryEntries(filesDir: String): Array<String>
+
+        /**
+         * Adds a word or phrase to the personal dictionary by hand.
+         *
+         * @param languages Language set the entry is for, or empty for every language.
+         * @return `false` if [text] holds no word or the dictionary cannot be saved.
+         */
+        @JvmStatic external fun nativeDictionaryAdd(filesDir: String, text: String, languages: String): Boolean
+
+        /** Removes an entry from the personal dictionary; `false` if there was none. */
+        @JvmStatic external fun nativeDictionaryRemove(filesDir: String, text: String, languages: String): Boolean
+
+        /**
+         * Counts the words and phrases of text the user entered without Dasher (dictation)
+         * in the personal dictionary.
+         *
+         * @param languages Language set that was active.
+         */
+        @JvmStatic external fun nativeDictionaryLearn(filesDir: String, text: String, languages: String)
+
+        /**
+         * Deletes everything learned from the user: the text written with Dasher and the
+         * learned entries of the personal dictionary.  Entries added by hand stay.  A running
+         * session keeps what it has learned until it is recreated.
+         */
+        @JvmStatic external fun nativeForgetLearned(filesDir: String)
     }
 }
