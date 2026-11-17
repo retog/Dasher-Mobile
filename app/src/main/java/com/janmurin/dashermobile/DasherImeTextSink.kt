@@ -14,7 +14,8 @@ import android.view.inputmethod.InputConnection
  * significantly cheaper than re-inserting the full string each frame.
  *
  * ## Newlines
- * A newline is committed only in multi-line editors and dropped in single-line ones.  The sink
+ * A newline is committed only in editors that take one (multi-line editors, and terminals, where it
+ * is the Enter key; see [acceptsNewlines]) and dropped in single-line ones.  The sink
  * never performs the editor's IME action ("Go", "Search", "Send"): Dasher outputs a symbol as soon
  * as the user steers into its box, so a brush with the ¶ box would send a half-written message.
  * (Chrome and WebView still turn a newline committed on its own into an Enter key press, which a
@@ -98,13 +99,15 @@ class DasherImeTextSink(
         get() = committed(lastText)
 
     /**
-     * `true` if the current editor takes newlines.  As in `TextView`, only a text editor with
-     * [InputType.TYPE_TEXT_FLAG_MULTI_LINE] does; [InputType.TYPE_TEXT_FLAG_IME_MULTI_LINE] marks
-     * a single-line editor.
+     * `true` if the current editor takes newlines.  As in `TextView`, a text editor does only with
+     * [InputType.TYPE_TEXT_FLAG_MULTI_LINE]; [InputType.TYPE_TEXT_FLAG_IME_MULTI_LINE] marks a
+     * single-line editor.  An editor of class [InputType.TYPE_NULL] (a terminal such as Termux)
+     * takes a newline as its Enter key, which the keyboard has no other way to press.
      */
     val acceptsNewlines: Boolean
         get() {
-            val inputType = editorInfoProvider()?.inputType ?: 0
+            val inputType = editorInfoProvider()?.inputType ?: return false
+            if ((inputType and InputType.TYPE_MASK_CLASS) == InputType.TYPE_NULL) return true
             val mask = InputType.TYPE_MASK_CLASS or InputType.TYPE_TEXT_FLAG_MULTI_LINE
             return (inputType and mask) == (InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE)
         }

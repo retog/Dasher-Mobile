@@ -74,6 +74,23 @@ class DasherImeTextSinkTest {
     }
 
     @Test
+    fun terminalTakesNewlinesAsItsEnterKey() {
+        // Termux reports TYPE_NULL, or class-less flags in its enforce-char-input mode.
+        val inputTypes = listOf(
+            InputType.TYPE_NULL,
+            InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        )
+        for (inputType in inputTypes) {
+            val editor = FakeEditor(inputType)
+            editor.sink.onTextChanged("ls\n")
+            assertEquals("ls\n", editor.text.toString())
+            assertTrue(editor.sink.acceptsNewlines)
+            editor.sink.onTextChanged("ls")
+            assertEquals("ls", editor.text.toString())
+        }
+    }
+
+    @Test
     fun reversingIntoTheBaselineDeletesTheEditorsText() {
         val editor = FakeEditor(InputType.TYPE_CLASS_TEXT)
         editor.text.append("ahoj svet")
