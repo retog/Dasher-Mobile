@@ -259,7 +259,8 @@ object DasherHostUi {
                     gravity = Gravity.TOP or Gravity.START
                     val margin = dp(12)
                     topMargin = margin
-                    leftMargin = margin
+                    // Start, not left: in a right-to-left layout the button sits at the right.
+                    marginStart = margin
                 }
                 isClickable = true
                 isFocusable = true
