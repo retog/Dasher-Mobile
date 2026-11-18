@@ -6,6 +6,16 @@ The app works as both a **standalone activity** and a system-wide **Input Method
 
 The architecture diagram is available in [`docs/architecture.puml`](docs/architecture.puml).
 
+## Using Dasher as the keyboard
+
+Android keeps a newly installed keyboard switched off: Dasher is listed in no keyboard switcher until it is turned on. To type with it in other apps:
+
+1. Open Dasher Mobile and tap the banner *Dasher is not on as a keyboard yet* (or **settings → keyboard**). Android's keyboard settings open; without the app, they are under Settings → System → Keyboard → On-screen keyboard (the names vary between phone makers).
+2. Turn **Dasher Mobile** on and confirm Android's warnings. Android shows them for every keyboard that does not come with the phone.
+3. Go back to Dasher Mobile: Android's keyboard chooser opens. Choose **Dasher Mobile**.
+
+Dasher then opens wherever you type. To use another keyboard again, use the keyboard button Android shows at the bottom of the screen while a keyboard is open, or **settings → keyboard** in Dasher Mobile. In Android's keyboard settings, the gear next to Dasher Mobile opens its settings.
+
 ---
 
 ## Dependencies

@@ -47,6 +47,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.Font
@@ -54,6 +55,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.janmurin.dashermobile.DasherKeyboard
 import com.janmurin.dashermobile.DasherLanguage
 import com.janmurin.dashermobile.KenlmModelFiles
 import com.janmurin.dashermobile.DasherPrefs
@@ -71,7 +73,7 @@ val InterItalic = FontFamily(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit, onKeyboardSetUp: () -> Unit) {
     val context = LocalContext.current
     val projectUrl = "https://github.com/janmurin2/Dasher-Mobile/"
     var selectedLanguage by remember { mutableStateOf(DasherPrefs.getLanguage(context)) }
@@ -86,6 +88,7 @@ fun SettingsScreen(onBack: () -> Unit) {
     var showImeHeightDialog by remember { mutableStateOf(false) }
     var showMovementSpeedDialog by remember { mutableStateOf(false) }
     var hasKenlmModelForLanguage by remember { mutableStateOf(KenlmModelFiles.hasModel(context, selectedLanguage)) }
+    var keyboardState by remember { mutableStateOf(DasherKeyboard.state(context)) }
 
     val importKenlmLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -104,6 +107,12 @@ fun SettingsScreen(onBack: () -> Unit) {
         selectedImeHeightPercent = DasherPrefs.getImeHeightPercent(context)
         selectedMovementSpeedPercent = DasherPrefs.getMovementSpeedPercent(context)
         hasKenlmModelForLanguage = KenlmModelFiles.hasModel(context, selectedLanguage)
+    }
+
+    // The window regains focus after Android's keyboard settings or keyboard chooser.
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    LaunchedEffect(windowFocused) {
+        if (windowFocused) keyboardState = DasherKeyboard.state(context)
     }
 
     LaunchedEffect(selectedLanguage, selectedLanguageModel) {
@@ -172,6 +181,20 @@ fun SettingsScreen(onBack: () -> Unit) {
                 .verticalScroll(rememberScrollState())
                 .padding(innerPadding)
         ) {
+            SettingRow(
+                iconResId = R.drawable.keyboard_24px,
+                iconContentDescription = stringResource(id = R.string.icon_keyboard),
+                title = stringResource(id = R.string.settings_keyboard),
+                currentValue = stringResource(
+                    id = when (keyboardState) {
+                        DasherKeyboard.State.OFF -> R.string.keyboard_off
+                        DasherKeyboard.State.ON -> R.string.keyboard_on
+                        DasherKeyboard.State.CURRENT -> R.string.keyboard_current
+                    }
+                ),
+                onClick = onKeyboardSetUp
+            )
+            HorizontalDivider(color = Color.Black, thickness = 1.dp)
             SettingRow(
                 iconResId = R.drawable.language_24px,
                 iconContentDescription = stringResource(id = R.string.icon_language),
