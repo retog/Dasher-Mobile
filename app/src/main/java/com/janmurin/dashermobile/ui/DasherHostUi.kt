@@ -50,6 +50,8 @@ import com.janmurin.dashermobile.VoiceMode
  *                                ([com.janmurin.dashermobile.VoiceMode.DICTATION]).
  * @property lettersButton        Button overlaid on the canvas that switches moving by spoken
  *                                letters on and off ([com.janmurin.dashermobile.VoiceMode.LETTERS]).
+ * @property keyboardBanner       Hidden banner below the top bar, for setting up Dasher as the
+ *                                system keyboard; `null` outside APP mode.
  */
 data class DasherHostViews(
     val root: View,
@@ -64,7 +66,8 @@ data class DasherHostViews(
     val canvasCalibrateButton: Button,
     val locateButton: ImageView?,
     val dictationButton: ImageView,
-    val lettersButton: ImageView
+    val lettersButton: ImageView,
+    val keyboardBanner: TextView?
 ) {
     /**
      * Shows which voice mode is on, by the colour of its button.
@@ -313,6 +316,7 @@ object DasherHostUi {
         }
 
         var settingsIcon: ImageView? = null
+        var keyboardBanner: TextView? = null
         if (hostMode == HostMode.APP) {
             val topBar = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -352,6 +356,25 @@ object DasherHostUi {
             topBar.addView(titleView)
             topBar.addView(settingsIcon)
             root.addView(topBar)
+
+            keyboardBanner = TextView(context).apply {
+                text = context.getString(R.string.keyboard_banner)
+                setTextColor(0xFF000000.toInt())
+                setBackgroundColor(0xFFE3E3E3.toInt())
+                textSize = 14f
+                typeface = ResourcesCompat.getFont(context, R.font.inter_italic)
+                setPadding(dp(16), dp(10), dp(16), dp(10))
+                isClickable = true
+                isFocusable = true
+                visibility = View.GONE
+            }
+            root.addView(
+                keyboardBanner,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
         }
 
         if (hostMode == HostMode.APP) {
@@ -433,7 +456,8 @@ object DasherHostUi {
             canvasCalibrateButton = canvasCalibrateButton,
             locateButton = locateButton,
             dictationButton = dictationButton,
-            lettersButton = lettersButton
+            lettersButton = lettersButton,
+            keyboardBanner = keyboardBanner
         )
     }
 }

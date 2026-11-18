@@ -6,11 +6,21 @@ The app works as both a **standalone activity** and a system-wide **Input Method
 
 The architecture diagram is available in [`docs/architecture.puml`](docs/architecture.puml).
 
+## Using Dasher as the keyboard
+
+Android keeps a newly installed keyboard switched off: Dasher is listed in no keyboard switcher until it is turned on. To type with it in other apps:
+
+1. Open Dasher Mobile and tap the banner *Dasher is not on as a keyboard yet* (or **settings → keyboard**). Android's keyboard settings open; without the app, they are under Settings → System → Keyboard → On-screen keyboard (the names vary between phone makers).
+2. Turn **Dasher Mobile** on and confirm Android's warnings. Android shows them for every keyboard that does not come with the phone.
+3. Go back to Dasher Mobile: Android's keyboard chooser opens. Choose **Dasher Mobile**.
+
+Dasher then opens wherever you type. To use another keyboard again, use the keyboard button Android shows at the bottom of the screen while a keyboard is open, or **settings → keyboard** in Dasher Mobile. In Android's keyboard settings, the gear next to Dasher Mobile opens its settings.
+
 ## Languages
 
 Dasher predicts for one or several languages at once, chosen under **Settings → Languages**: German, English, Spanish, French, Italian and Slovak. With several chosen, the boxes offer the letters of all of them, each accented letter next to its base letter, and one language model sizes them, trained on text of every chosen language. Which language is being written shows in the letters just written, so the model follows a switch of language within a few letters.
 
-A language's model starts from a training text, and one is included for each language. The English, German, French, Italian and Spanish texts are those of [DasherCore](https://github.com/dasher-project/DasherCore/tree/main/Data/training) (MIT licence); the Slovak one is the novel *Drak sa vracia* by Dobroslav Chrobák. To add a text of your own to a language's — your own writing, say — import a plain text file (UTF-8) under **Settings → Training texts**.
+A language's model starts from a training text, and one is included for each language. The English, German, French, Italian and Spanish texts are those of [DasherCore](https://github.com/dasher-project/DasherCore/tree/main/Data/training) (MIT licence): the English one comes with the `third_party/DasherCore` submodule, the others are copies in `app/src/main/assets/training/`. The Slovak one is the novel *Drak sa vracia* by Dobroslav Chrobák. To add a text of your own to a language's — your own writing, say — import a plain text file (UTF-8) under **Settings → Training texts**.
 
 A KenLM model belongs to one alphabet, so its file is named after the chosen languages: `kenlm_English with limited punctuation.binary` for English alone, `kenlm_Slovak.binary` for Slovak alone, and otherwise `kenlm_Dasher Mobile ` followed by the language codes, e.g. `kenlm_Dasher Mobile de+en.binary`. KenLM models do not learn.
 

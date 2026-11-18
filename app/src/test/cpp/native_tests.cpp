@@ -118,7 +118,10 @@ void testLanguageSets() {
     for (const std::string &language : SupportedLanguages()) {
         const std::string asset = CorpusAssetFor(language);
         CHECK(!asset.empty());
-        CHECK(readFile(std::string(DASHER_TEST_ASSETS) + "/training/" + asset).size() > 100000);
+        // The English one comes with DasherCore, the others with the app.
+        const size_t size = readFile(std::string(DASHER_TEST_ASSETS) + "/training/" + asset).size()
+            + readFile(std::string(DASHER_TEST_CORE_DATA) + "/training/" + asset).size();
+        CHECK(size > 100000);
     }
     CHECK(!contains(AlphabetXml({"en"}), "label=\"¿\""));
 }
