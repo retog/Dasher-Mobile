@@ -48,11 +48,12 @@ struct Language {
 
 /// In alphabetical order of the codes.
 const Language kLanguages[] = {
-    {"de", "ä ö ü ß", "", "", "", ""},
-    {"en", "", "", "English with limited punctuation", "", "training_english_GB.txt"},
-    {"es", "á é í ñ ó ú ü", "¿ ¡", "", "", ""},
-    {"fr", "à â æ ç é è ê ë î ï ô œ ù û ü ÿ", "", "", "", ""},
-    {"it", "à è é ì ò ù", "", "", "", ""},
+    {"de", "ä ö ü ß", "", "", "training_german_DE.txt", ""},
+    {"en", "", "", "English with limited punctuation", "training_english_GB.txt",
+     "training_english_GB.txt"},
+    {"es", "á é í ñ ó ú ü", "¿ ¡", "", "training_spanish_ES.txt", ""},
+    {"fr", "à â æ ç é è ê ë î ï ô œ ù û ü ÿ", "", "", "training_french_FR.txt", ""},
+    {"it", "à è é ì ò ù", "", "", "training_italian_IT.txt", ""},
     {"sk", "á ä č ď é í ĺ ľ ň ó ô ŕ š ť ú ý ž", "", "Slovak", "training_slovak_SK.txt",
      "training_slovak_SK.txt"},
 };

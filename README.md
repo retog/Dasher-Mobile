@@ -10,7 +10,7 @@ The architecture diagram is available in [`docs/architecture.puml`](docs/archite
 
 Dasher predicts for one or several languages at once, chosen under **Settings → Languages**: German, English, Spanish, French, Italian and Slovak. With several chosen, the boxes offer the letters of all of them, each accented letter next to its base letter, and one language model sizes them, trained on text of every chosen language. Which language is being written shows in the letters just written, so the model follows a switch of language within a few letters.
 
-A language's model starts from a training text. One is included for Slovak; for the other languages import a plain text file (UTF-8) under **Settings → Training texts** — any long text in the language will do. Without one, a language is learned only from what you write.
+A language's model starts from a training text, and one is included for each language. The English, German, French, Italian and Spanish texts are those of [DasherCore](https://github.com/dasher-project/DasherCore/tree/main/Data/training) (MIT licence); the Slovak one is the novel *Drak sa vracia* by Dobroslav Chrobák. To add a text of your own to a language's — your own writing, say — import a plain text file (UTF-8) under **Settings → Training texts**.
 
 A KenLM model belongs to one alphabet, so its file is named after the chosen languages: `kenlm_English with limited punctuation.binary` for English alone, `kenlm_Slovak.binary` for Slovak alone, and otherwise `kenlm_Dasher Mobile ` followed by the language codes, e.g. `kenlm_Dasher Mobile de+en.binary`. KenLM models do not learn.
 

@@ -7,13 +7,12 @@ import java.io.File
 /**
  * The text a language's letter probabilities are first learned from.
  *
- * A session is trained on one such text per active language: the one bundled with the app, if
- * any, and the one the user imported.  Without either, a language is learned only from what
- * the user writes.
+ * A session is trained on such texts for each active language: the one bundled with the app
+ * and, if there is one, the one the user imported.
  */
 object TrainingTexts {
     enum class Source {
-        /** Only what the user writes. */
+        /** No text: the language is learned only from what the user writes. */
         NONE,
         /** A text that comes with the app. */
         BUNDLED,

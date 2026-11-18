@@ -41,7 +41,7 @@
     <string name="icon_voice_letters">Move by spoken letters</string>
     <string name="icon_delete">Delete</string>
     <string name="voice_unavailable">Speech cannot be recognised on this device right now.</string>
-    <string name="training_texts_hint">Dasher learns which letters follow which from a text in each language. Import a plain text file (UTF-8), the longer the better; without one, a language is learned only from what you write.</string>
+    <string name="training_texts_hint">Dasher learns which letters follow which from a text in each language, and comes with one for each. You can add a text of your own to a language\'s: import a plain text file (UTF-8).</string>
     <string name="training_text_bundled">Included</string>
     <string name="training_text_imported">Imported</string>
     <string name="training_text_none">None</string>

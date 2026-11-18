@@ -113,6 +113,13 @@ void testLanguageSets() {
     CHECK(mixed.find("label=\"ä\"") < mixed.find("label=\"b\""));
 
     CHECK(contains(AlphabetXml({"es"}), "label=\"¿\""));
+
+    // Every language comes with a training text.
+    for (const std::string &language : SupportedLanguages()) {
+        const std::string asset = CorpusAssetFor(language);
+        CHECK(!asset.empty());
+        CHECK(readFile(std::string(DASHER_TEST_ASSETS) + "/training/" + asset).size() > 100000);
+    }
     CHECK(!contains(AlphabetXml({"en"}), "label=\"¿\""));
 }
 
@@ -413,20 +420,31 @@ void testSession(const std::string &dir) {
     // English alphabet of then typed "·" for a full stop.
     {
         std::ofstream legacy(dir + "/training_english_GB.txt", std::ios::binary);
-        legacy << "\xC2\xA7##well\xC2\xB7\xE2\x96\xA1then";
+        legacy << "\xC2\xA7##wellxq\xC2\xB7\xE2\x96\xA1thenxq";
     }
     {
         AndroidDasherInterface dasher(dir, "en+fr");
         dasher.SetScreenSize(800, 600);
-        CHECK(contains(readFile(dir + "/training_cache.txt"), "well.\xE2\x96\xA1then"));
+        CHECK(contains(readFile(dir + "/training_cache.txt"), "wellxq.\xE2\x96\xA1thenxq"));
     }
     {
         AndroidDasherInterface dasher(dir, "fr");
         dasher.SetScreenSize(800, 600);
-        CHECK(!contains(readFile(dir + "/training_cache.txt"), "then"));
+        CHECK(!contains(readFile(dir + "/training_cache.txt"), "thenxq"));
     }
 
-    // An imported training text is read as plain text.
+    // A session is trained on the bundled text of each of its languages, and of no other.
+    {
+        AndroidDasherInterface dasher(dir, "de+es");
+        dasher.SetScreenSize(800, 600);
+        const std::string training = readFile(dir + "/training_cache.txt");
+        CHECK(contains(training, "Warum\xE2\x96\xA1sagst\xE2\x96\xA1" "du\xE2\x96\xA1" "das?"));
+        CHECK(contains(training, "Dame\xE2\x96\xA1un\xE2\x96\xA1minuto."));
+        CHECK(!contains(training, "Pourquoi"));
+        CHECK(!contains(training, "Drak"));
+    }
+
+    // An imported training text is read as plain text, besides the bundled one.
     {
         std::ofstream corpus(dir + "/corpus_fr.txt", std::ios::binary);
         corpus << "Bonjour tout le monde\n";
@@ -434,7 +452,9 @@ void testSession(const std::string &dir) {
     {
         AndroidDasherInterface dasher(dir, "fr");
         dasher.SetScreenSize(800, 600);
-        CHECK(contains(readFile(dir + "/training_cache.txt"), "Bonjour\xE2\x96\xA1tout"));
+        const std::string training = readFile(dir + "/training_cache.txt");
+        CHECK(contains(training, "Bonjour\xE2\x96\xA1tout"));
+        CHECK(contains(training, "Pourquoi\xE2\x96\xA1" "dis-tu"));
     }
 
     DasherAndroid::ForgetLearnedText();
