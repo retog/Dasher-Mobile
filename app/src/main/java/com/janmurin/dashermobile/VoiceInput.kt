@@ -103,6 +103,9 @@ class VoiceInput(private val context: Context, private val listener: Listener) {
             listener.onVoiceUnavailable()
             return
         }
+        // A recogniser still listening for the mode replaced would reject a new request as busy.
+        handler.removeCallbacks(listenAgain)
+        recognizer?.cancel()
         this.language = language
         this.mode = mode
         failures = 0

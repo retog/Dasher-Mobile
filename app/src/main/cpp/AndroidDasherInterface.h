@@ -233,6 +233,9 @@ public:
     /// @brief Whether a move started by @ref SteerToSymbol or @ref SteerBack is under way.
     bool IsSteering() const { return m_steer.active; }
 
+    /// @brief Ends a move started by @ref SteerToSymbol or @ref SteerBack where it is.
+    void StopSteering() { stopSteering(); }
+
 protected:
     /** @brief Registers the @c AndroidPointerInput module with DasherCore. */
     void CreateModules() override;

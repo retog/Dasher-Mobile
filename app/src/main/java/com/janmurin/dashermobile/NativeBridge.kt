@@ -235,6 +235,14 @@ class NativeBridge {
         @JvmStatic external fun nativeIsSteering(handle: Long): Boolean
 
         /**
+         * Ends a move started by [nativeSteerToSymbol] or [nativeSteerBack] where it is; the
+         * symbol it was moving to is not written.
+         *
+         * @param handle Opaque session handle.
+         */
+        @JvmStatic external fun nativeStopSteering(handle: Long)
+
+        /**
          * Lists the personal dictionary, the most often written entries first.
          *
          * @param filesDir The application's private files directory.

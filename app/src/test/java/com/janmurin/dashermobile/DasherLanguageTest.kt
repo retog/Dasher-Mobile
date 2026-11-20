@@ -1,6 +1,7 @@
 package com.janmurin.dashermobile
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** Unit tests for the language sets of [DasherLanguage]. */
@@ -34,7 +35,7 @@ class DasherLanguageTest {
     @Test
     fun theVoiceLanguageIsOneOfTheActiveOnes() {
         val active = setOf(DasherLanguage.ITALIAN, DasherLanguage.FRENCH)
-        assert(VoiceInput.languageFor(active) in active)
+        assertTrue(VoiceInput.languageFor(active) in active)
         assertEquals(DasherLanguage.SLOVAK, VoiceInput.languageFor(setOf(DasherLanguage.SLOVAK)))
     }
 }

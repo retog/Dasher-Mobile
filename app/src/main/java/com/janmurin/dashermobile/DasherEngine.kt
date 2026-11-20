@@ -468,11 +468,17 @@ class DasherEngine(
     }
 
     /**
-     * Drops the symbols waiting to be steered to.  A move under way is finished, unless a
-     * touch or a new text ends it: the native side stops it then.
+     * Drops the symbols waiting to be steered to and ends the move under way where it is, so
+     * nothing more is written.
      */
     fun cancelSteering() {
         steerQueue.clear()
+        if (steering) {
+            steering = false
+            if (!destroyed && nativeHandle != 0L) NativeBridge.nativeStopSteering(nativeHandle)
+            // Show the boxes as the move left them.
+            hasBootstrapFrame = false
+        }
     }
 
     private fun steerNext() {

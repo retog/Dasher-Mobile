@@ -625,6 +625,15 @@ Java_com_janmurin_dashermobile_NativeBridge_nativeIsSteering(JNIEnv *, jclass, j
     return session && session->iface && session->iface->IsSteering() ? JNI_TRUE : JNI_FALSE;
 }
 
+/** @brief JNI binding for @c NativeBridge.nativeStopSteering. Ends a move where it is. */
+JNIEXPORT void JNICALL
+Java_com_janmurin_dashermobile_NativeBridge_nativeStopSteering(JNIEnv *, jclass, jlong handle) {
+    auto *session = fromHandle(handle);
+    if (session && session->iface) {
+        session->iface->StopSteering();
+    }
+}
+
 /**
  * @brief JNI binding for @c NativeBridge.nativeDictionaryEntries.
  *
