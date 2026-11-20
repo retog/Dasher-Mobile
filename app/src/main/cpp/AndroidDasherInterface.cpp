@@ -13,11 +13,18 @@
  */
 
 #include "AndroidDasherInterface.h"
+#include "AndroidFiles.h"
+#include "LanguageSet.h"
 #include "SymbolText.h"
 
 #include "DasherCore/Alphabet/AlphInfo.h"
+#include "DasherCore/AlphabetManager.h"
 #include "DasherCore/DasherInput.h"
+#include "DasherCore/DasherModel.h"
+#include "DasherCore/DasherNode.h"
 #include "DasherCore/DasherScreen.h"
+#include "DasherCore/DasherView.h"
+#include "DasherCore/ExpansionPolicy.h"
 #include "DasherCore/ModuleManager.h"
 #include "DasherCore/Parameters.h"
 
@@ -359,10 +366,14 @@ AndroidSettingsHolder::AndroidSettingsHolder(const std::string &settingsPath) {
     settings->Load();
 }
 
-AndroidDasherInterface::AndroidDasherInterface(const std::string &filesDir)
+AndroidDasherInterface::AndroidDasherInterface(const std::string &filesDir, const std::string &languages)
     : AndroidSettingsHolder(filesDir + "/dasher_settings.xml")
     , Dasher::CDashIntfScreenMsgs(AndroidSettingsHolder::settings.get())
+    , m_languages(DasherAndroid::SetLanguages(languages))
 {
+    // The file layer offers DasherCore one alphabet, generated for these languages.
+    SetStringParameter(Dasher::SP_ALPHABET_ID,
+                       DasherAndroid::AlphabetIdFor(DasherAndroid::ParseLanguages(m_languages)));
     // Learning is on unless a host turns it off for one editor (SetLearningEnabled); the value
     // is persisted, so do not let an editor that switched it off outlive the process.
     SetBoolParameter(Dasher::BP_LM_ADAPTIVE, true);
@@ -404,11 +415,6 @@ void AndroidDasherInterface::SetScreenSize(int width, int height) {
     if (!m_realized) {
         Realize(nowMs());
         m_realized = true;
-        if (!m_pendingAlphabetId.empty()) {
-            const std::string pendingAlphabet = m_pendingAlphabetId;
-            m_pendingAlphabetId.clear();
-            SetAlphabetId(pendingAlphabet);
-        }
         __android_log_print(ANDROID_LOG_INFO, LOG_TAG, "alphabetID=%s",
                             GetStringParameter(Dasher::SP_ALPHABET_ID).c_str());
     }
@@ -423,6 +429,9 @@ void AndroidDasherInterface::SetTouch(int action, float x, float y) {
         return;
     }
     m_input->SetTouch(action, x, y);
+    if (action == 0) {
+        stopSteering();
+    }
 
     if (action == 0 && !m_startedByTouch) {
         SetBoolParameter(Dasher::BP_START_MOUSE, true);
@@ -439,6 +448,9 @@ std::vector<int32_t> AndroidDasherInterface::Frame(long timeMs) {
         return {};
     }
 
+    if (m_steer.active) {
+        advanceSteering();
+    }
     m_screen->BeginFrame();
     CallNewFrame(static_cast<unsigned long>(std::max(0L, timeMs)), false);
     return m_screen->TakeCommands();
@@ -447,34 +459,6 @@ std::vector<int32_t> AndroidDasherInterface::Frame(long timeMs) {
 std::vector<std::string> AndroidDasherInterface::TakeFrameStrings() {
     if (!m_screen) return {};
     return m_screen->TakeStrings();
-}
-
-std::string AndroidDasherInterface::GetAlphabetId() const {
-    return GetStringParameter(Dasher::SP_ALPHABET_ID);
-}
-
-void AndroidDasherInterface::SetAlphabetId(const std::string &alphabetId) {
-    if (alphabetId.empty()) {
-        return;
-    }
-
-    m_editBuffer.clear();
-    m_symbolEnds.clear();
-
-    if (!m_realized) {
-        m_pendingAlphabetId = alphabetId;
-        return;
-    }
-
-    if (GetStringParameter(Dasher::SP_ALPHABET_ID) != alphabetId) {
-        if (m_startedByTouch) {
-            KeyDown(nowMs(), Dasher::Keys::Primary_Input);
-            m_startedByTouch = false;
-        }
-        SetStringParameter(Dasher::SP_ALPHABET_ID, alphabetId);
-    }
-    // The model must match the emptied buffer; an alphabet switch keeps the old offset.
-    ResetOutputText();
 }
 
 int AndroidDasherInterface::GetLanguageModelId() const {
@@ -490,6 +474,7 @@ void AndroidDasherInterface::SetLanguageModelId(int modelId) {
         KeyDown(nowMs(), Dasher::Keys::Primary_Input);
         m_startedByTouch = false;
     }
+    stopSteering();
     // The switch recreates the alphabet manager, dropping its unsaved training buffer.
     FlushTrainingText();
     SetLongParameter(Dasher::LP_LANGUAGE_MODEL_ID, static_cast<long>(resolved));
@@ -556,6 +541,7 @@ std::string AndroidDasherInterface::GetOutputText() const {
 }
 
 void AndroidDasherInterface::ResetOutputText() {
+    stopSteering();
     FlushTrainingText();
     m_editBuffer.clear();
     m_symbolEnds.clear();
@@ -565,6 +551,7 @@ void AndroidDasherInterface::ResetOutputText() {
 }
 
 std::string AndroidDasherInterface::SetContext(const std::string &textBeforeCursor) {
+    stopSteering();
     FlushTrainingText();
     m_editBuffer.clear();
     m_symbolEnds.clear();
@@ -615,3 +602,395 @@ void AndroidDasherInterface::FlushTrainingText() {
     }
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// Steering into a symbol's box (spoken letters)
+// ---------------------------------------------------------------------------------------------
+
+namespace {
+
+/// Frames a zoom and a scroll take.
+constexpr int kZoomFrames = 12;
+constexpr int kScrollFrames = 10;
+/// Zooms and scrolls after which a move is given up; a box is normally reached in two to four.
+constexpr int kMaxSteerMoves = 12;
+/// Share of the screen height the box moved into fills when the move ends.  The crosshair is
+/// half a screen height from the edge the boxes grow from, and a box is as wide as it is high,
+/// so above one half the crosshair is inside the box.
+constexpr double kFinalShare = 0.6;
+/// A box inside it is entered too if it fills more than half the screen; stay clear of any that
+/// comes close.
+constexpr double kSafeChildShare = 0.45;
+/// Share of the screen height a box fills after a zoom that only brings it closer.
+constexpr double kApproachShare = 0.15;
+/// Height, in Dasher coordinates, below which a box is first brought closer.  Zooms are given
+/// in whole coordinates, too coarse to aim into a smaller box.
+constexpr double kMinExactHeight = 200;
+/// How far, in Dasher coordinates, the crosshair may end up from where a zoom was aimed.
+constexpr double kAimError = 2;
+/// Height the model's root may reach in a zoom.  Beyond its own limit (2^46) the model moves
+/// its root down, in arithmetic that overflows if the limit is passed by far.
+constexpr double kMaxRootHeight = 1e13;
+/// The crosshair's place on the axis the boxes are stacked along.
+constexpr double kCrosshair = static_cast<double>(Dasher::CDasherModel::ORIGIN_Y);
+
+struct Range {
+    Dasher::myint min = 0;
+    Dasher::myint max = 0;
+    Dasher::myint height() const { return max - min; }
+};
+
+Range childRange(const Range &parent, const Dasher::CDasherNode *child) {
+    const auto norm = static_cast<Dasher::myint>(Dasher::CDasherModel::NORMALIZATION);
+    return {parent.min + parent.height() * static_cast<Dasher::myint>(child->Lbnd()) / norm,
+            parent.min + parent.height() * static_cast<Dasher::myint>(child->Hbnd()) / norm};
+}
+
+/**
+ * A view that draws nothing.  It notes which node the model has as its root and where that
+ * root is, in Dasher coordinates: the model keeps both to itself, but passes them to the view
+ * it renders to.
+ *
+ * Like a drawing view it also tells the model which boxes cover the whole screen, so the model
+ * moves its root down to the innermost of them.  DasherCore's own view never reports a group
+ * of symbols as covering the screen, so the root stays at the first symbol written and grows
+ * with every zoom, until the zooms scheduled here overflow the model's coordinates.
+ */
+class RootProbe final : public Dasher::CDasherView {
+public:
+    /// @param output    The node under the crosshair, handed back so nothing is written.
+    /// @param reparents How many times to make the model put the root's parent in its place;
+    ///                  if zero, the root is moved down instead.
+    RootProbe(Dasher::CDasherScreen *screen, Dasher::CDasherNode *output, int reparents)
+        : Dasher::CDasherView(screen, Dasher::Options::LeftToRight)
+        , m_output(output), m_reparents(reparents), m_moveRootDown(reparents == 0) {}
+
+    /// The model's root once the render is over, and where it is.
+    Dasher::CDasherNode *root = nullptr;
+    Range rootRange;
+
+    Dasher::CDasherNode *Render(Dasher::CDasherNode *pRoot, Dasher::myint iRootMin, Dasher::myint iRootMax,
+                                Dasher::CExpansionPolicy &) override {
+        root = pRoot;
+        rootRange = {iRootMin, iRootMax};
+        std::vector<Dasher::CDasherNode *> path;   // From the node under the crosshair up to the root.
+        Dasher::CDasherNode *node = m_output;
+        for (; node && node != pRoot; node = node->Parent()) path.push_back(node);
+        if (m_moveRootDown && node == pRoot) {
+            const Dasher::myint screen = Dasher::CDasherModel::MAX_Y;
+            for (auto it = path.rbegin(); it != path.rend(); ++it) {
+                const Range range = childRange(rootRange, *it);
+                if (range.min > 0 || range.max < screen) break;
+                // The model makes a root's child the root if it is the only one drawn and
+                // covers the screen.
+                root->onlyChildRendered = *it;
+                (*it)->SetFlag(Dasher::CDasherNode::NF_SUPER, true);
+                root = *it;
+                rootRange = range;
+            }
+            root->onlyChildRendered = nullptr;
+        }
+        return m_output;
+    }
+    bool IsSpaceAroundNode(Dasher::myint, Dasher::myint) const override {
+        if (m_reparents <= 0) return false;
+        --m_reparents;
+        return true;
+    }
+    void Screen2Dasher(Dasher::screenint, Dasher::screenint, Dasher::myint &x, Dasher::myint &y) const override {
+        x = y = 0;
+    }
+    void Dasher2Screen(Dasher::myint, Dasher::myint, Dasher::screenint &x, Dasher::screenint &y) const override {
+        x = y = 0;
+    }
+    void Dasher2Polar(Dasher::myint, Dasher::myint, double &r, double &theta) const override {
+        r = theta = 0;
+    }
+    DasherCoordScreenRegion VisibleRegion() const override {
+        return {0, 0, Dasher::CDasherModel::MAX_Y, Dasher::CDasherModel::MAX_Y};
+    }
+    void DasherSpaceArc(Dasher::myint, Dasher::myint, Dasher::myint, Dasher::myint, Dasher::myint, Dasher::myint,
+                        const Dasher::ColorPalette::Color &, int) const override {}
+    void DasherLine2Screen(Dasher::myint, Dasher::myint, Dasher::myint, Dasher::myint,
+                           std::vector<Dasher::point> &) const override {}
+
+private:
+    Dasher::CDasherNode *m_output;
+    mutable int m_reparents;
+    bool m_moveRootDown;
+};
+
+/// Where @p node is, given where the model's root is; false if the two are not in one line of
+/// descent.
+bool rangeOf(Dasher::CDasherNode *node, Dasher::CDasherNode *root, const Range &rootRange, Range &out) {
+    std::vector<Dasher::CDasherNode *> chain;
+    Dasher::CDasherNode *n = node;
+    for (; n && n != root; n = n->Parent()) chain.push_back(n);
+    if (n == root) {
+        out = rootRange;
+        for (auto it = chain.rbegin(); it != chain.rend(); ++it) out = childRange(out, *it);
+        return true;
+    }
+    // The node is above the root: work outwards from the root.
+    const auto norm = static_cast<double>(Dasher::CDasherModel::NORMALIZATION);
+    double min = static_cast<double>(rootRange.min);
+    double max = static_cast<double>(rootRange.max);
+    for (n = root; n && n != node; n = n->Parent()) {
+        if (n->Range() == 0) return false;
+        const double parentHeight = (max - min) * norm / n->Range();
+        min -= parentHeight * n->Lbnd() / norm;
+        max = min + parentHeight;
+    }
+    if (n != node) return false;
+    out = {static_cast<Dasher::myint>(std::llround(min)), static_cast<Dasher::myint>(std::llround(max))};
+    return true;
+}
+
+bool isGroup(Dasher::CDasherNode *node) {
+    return dynamic_cast<Dasher::CGroupNode *>(node) != nullptr;
+}
+
+/// The node of the symbol written last as seen from @p node: itself, or the nearest node above
+/// it that is not a group of symbols.  The node of an empty text is a group without a parent.
+Dasher::CDasherNode *symbolNodeOf(Dasher::CDasherNode *node) {
+    while (node && isGroup(node) && node->Parent()) node = node->Parent();
+    return node;
+}
+
+/// The symbol boxes directly inside @p parent, looking through groups, each with the share of
+/// @p parent it takes (from, to).
+struct SymbolBox {
+    Dasher::CSymbolNode *node;
+    double from;
+    double to;
+};
+
+void collectSymbols(Dasher::CDasherModel *model, Dasher::CDasherNode *parent, double from, double to,
+                    std::vector<SymbolBox> &out) {
+    model->ExpandNode(parent);
+    const auto norm = static_cast<double>(Dasher::CDasherModel::NORMALIZATION);
+    for (Dasher::CDasherNode *child : parent->GetChildren()) {
+        const double childFrom = from + (to - from) * child->Lbnd() / norm;
+        const double childTo = from + (to - from) * child->Hbnd() / norm;
+        if (auto *symbol = dynamic_cast<Dasher::CSymbolNode *>(child)) {
+            out.push_back({symbol, childFrom, childTo});
+        } else if (isGroup(child)) {
+            collectSymbols(model, child, childFrom, childTo, out);
+        }
+    }
+}
+
+/// The point of a box, as a share of its height, to put the crosshair on so that no box inside
+/// it is entered as well: its middle, unless a box there would fill half the screen.
+double safePoint(const std::vector<SymbolBox> &boxes) {
+    const auto tooBig = [](const SymbolBox &box) {
+        return (box.to - box.from) * kFinalShare >= kSafeChildShare;
+    };
+    for (const SymbolBox &box : boxes) {
+        if (box.from <= 0.5 && 0.5 < box.to && !tooBig(box)) return 0.5;
+    }
+    const SymbolBox *best = nullptr;
+    for (const SymbolBox &box : boxes) {
+        if (tooBig(box)) continue;
+        if (!best || box.to - box.from > best->to - best->from) best = &box;
+    }
+    return best ? (best->from + best->to) / 2 : 0.5;
+}
+
+}
+
+void AndroidDasherInterface::stopSteering() {
+    if (!m_steer.active) return;
+    m_steer = Steering();
+    if (m_pDasherModel) m_pDasherModel->ClearScheduledSteps();
+}
+
+bool AndroidDasherInterface::SteerToSymbol(const std::string &plainText) {
+    if (!m_realized || !m_pDasherModel || plainText.empty()) return false;
+    const std::string symbol = DasherAndroid::ToSymbolText(plainText);
+    const Dasher::CAlphInfo *alphabet = GetActiveAlphabet();
+    bool known = false;
+    for (int i = 1; alphabet && i < alphabet->iEnd && !known; ++i) {
+        known = alphabet->GetText(i) == symbol;
+    }
+    if (!known) return false;
+    if (m_startedByTouch) {
+        KeyDown(nowMs(), Dasher::Keys::Primary_Input);
+        m_startedByTouch = false;
+    }
+    stopSteering();
+    m_steer.active = true;
+    m_steer.symbol = symbol;
+    m_steer.from = symbolNodeOf(m_pDasherModel->Get_node_under_crosshair());
+    advanceSteering();
+    return m_steer.active;
+}
+
+bool AndroidDasherInterface::SteerBack() {
+    if (!m_realized || !m_pDasherModel || m_symbolEnds.empty()) return false;
+    if (m_startedByTouch) {
+        KeyDown(nowMs(), Dasher::Keys::Primary_Input);
+        m_startedByTouch = false;
+    }
+    stopSteering();
+    m_steer.active = true;
+    m_steer.back = true;
+    m_steer.from = symbolNodeOf(m_pDasherModel->Get_node_under_crosshair());
+    advanceSteering();
+    return m_steer.active;
+}
+
+void AndroidDasherInterface::advanceSteering() {
+    if (m_steer.framesLeft > 0) {
+        --m_steer.framesLeft;
+        return;
+    }
+    Dasher::CDasherModel *model = m_pDasherModel.get();
+    Dasher::CDasherNode *under = model ? model->Get_node_under_crosshair() : nullptr;
+    Dasher::CDasherNode *current = symbolNodeOf(under);
+    // In another symbol's box than at the start, the move is over: the box aimed for was
+    // entered (or left, moving back), or the user moved elsewhere.
+    if (!current || current != m_steer.from || !m_screen || m_steer.moves >= kMaxSteerMoves) {
+        stopSteering();
+        return;
+    }
+
+    // The model's movements are given as the stretch of the axis that is to fill the screen:
+    // here "window" coordinates high, with "centre" in the middle, i.e. under the crosshair.
+    const double screenHeight = static_cast<double>(Dasher::CDasherModel::MAX_Y);
+    double rootHeight = 0;
+    const auto move = [&](double centre, double window, int frames) {
+        // Keep the root within the model's coordinates; the next zoom goes on from there.
+        window = std::max(window, screenHeight * rootHeight / kMaxRootHeight);
+        const auto y1 = static_cast<Dasher::myint>(std::llround(centre - window / 2));
+        const auto y2 = y1 + std::max<Dasher::myint>(1, static_cast<Dasher::myint>(std::llround(window)));
+        model->ScheduleZoom(y1, y2, frames);
+        m_steer.framesLeft = frames;
+        ++m_steer.moves;
+    };
+
+    Dasher::NoExpansions noExpansions;
+    if (m_steer.back) {
+        // The node of the symbol before.  After text was loaded the model has yet to rebuild
+        // the nodes above its root, which it does when a view reports space around the root.
+        Dasher::CDasherNode *before = nullptr;
+        Dasher::CDasherNode *previous = nullptr;
+        Dasher::CDasherNode *root = nullptr;
+        Range rootRange;
+        for (int attempt = 0; attempt < 8 && !before; ++attempt) {
+            RootProbe probe(m_screen.get(), under, 1);
+            model->RenderToView(&probe, noExpansions);
+            root = probe.root;
+            rootRange = probe.rootRange;
+            Dasher::CDasherNode *candidate = current->Parent() ? symbolNodeOf(current->Parent()) : nullptr;
+            if (candidate && !isGroup(candidate)) {
+                before = candidate;
+            } else if (candidate && candidate == previous) {
+                // A group with nothing above it even after rebuilding: the start of the text.
+                before = candidate;
+            }
+            previous = candidate;
+        }
+        Range box;
+        if (!before || !root || !rangeOf(before, root, rootRange, box)) {
+            stopSteering();
+            return;
+        }
+        rootHeight = static_cast<double>(rootRange.height());
+        const double height = std::max<double>(1.0, static_cast<double>(box.height()));
+        if (!m_steer.zoomedOut) {
+            // Zoom out, the crosshair staying where it is, until the box before fills the
+            // screen as a box moved into does.  That alone takes the crosshair out of the
+            // last symbol's box, unless that box is most of the one before.
+            m_steer.zoomedOut = true;
+            move(kCrosshair, height / kFinalShare, kZoomFrames);
+        } else {
+            std::vector<SymbolBox> inside;
+            collectSymbols(model, before, 0, 1, inside);
+            move(static_cast<double>(box.min) + safePoint(inside) * height, screenHeight, kScrollFrames);
+        }
+        return;
+    }
+
+    std::vector<SymbolBox> boxes;
+    collectSymbols(model, current, 0, 1, boxes);
+    const SymbolBox *target = nullptr;
+    for (const SymbolBox &box : boxes) {
+        if (box.node->outputText() == m_steer.symbol) target = &box;
+    }
+    RootProbe probe(m_screen.get(), under, 0);
+    model->RenderToView(&probe, noExpansions);
+    Range currentRange;
+    if (!target || !probe.root || !rangeOf(current, probe.root, probe.rootRange, currentRange)) {
+        stopSteering();
+        return;
+    }
+    rootHeight = static_cast<double>(probe.rootRange.height());
+
+    // Boxes are placed by their share of the current box, finer than whole coordinates.
+    struct Span {
+        double top;
+        double bottom;
+        bool isTarget;
+    };
+    const double origin = static_cast<double>(currentRange.min);
+    const double scale = static_cast<double>(currentRange.height());
+    std::vector<Span> spans;
+    for (const SymbolBox &box : boxes) {
+        spans.push_back({origin + box.from * scale, origin + box.to * scale, &box == target});
+    }
+    const double top = origin + target->from * scale;
+    const double bottom = origin + target->to * scale;
+    const double height = bottom - top;
+
+    // Whether a box other than the target's is entered while the crosshair goes from one
+    // point to another and the screen comes to show "window" coordinates: one it passes
+    // over that fills close to half the screen by the end.
+    const auto entersOther = [&](double from, double to, double window) {
+        const double low = std::min(from, to) - kAimError;
+        const double high = std::max(from, to) + kAimError;
+        for (const Span &span : spans) {
+            if (span.isTarget || span.bottom < low || span.top > high) continue;
+            if (span.bottom - span.top >= kSafeChildShare * window) return true;
+        }
+        return false;
+    };
+    // Scrolls a point level with the crosshair and zooms until the screen shows "window"
+    // coordinates around it: in one movement if no other box is entered on the way, else
+    // the scroll first, at a scale where the boxes are smaller.
+    const auto approach = [&](double point, double window) {
+        const bool level = std::abs(point - kCrosshair) <= kAimError / 2;
+        if (level || !entersOther(kCrosshair, point, window)) {
+            move(level ? kCrosshair : point, window, kZoomFrames);
+        } else {
+            move(point, screenHeight, kScrollFrames);
+        }
+    };
+
+    if (height >= kMinExactHeight) {
+        // Big enough to aim into: make it fill the screen as far as enters it, with the
+        // crosshair on a point where no box inside it is entered as well.
+        std::vector<SymbolBox> inside;
+        collectSymbols(model, target->node, 0, 1, inside);
+        for (const SymbolBox &box : inside) {
+            spans.push_back({top + box.from * height, top + box.to * height, false});
+        }
+        approach(top + safePoint(inside) * height, height / kFinalShare);
+        return;
+    }
+
+    // Too small to aim into: bring it closer.  The crosshair may end up beside it, so it is
+    // put where every box near it stays too small to be entered.
+    const double middle = std::round((top + bottom) / 2);
+    for (double window = std::max(8.0, height / kApproachShare); window < screenHeight; window *= 2) {
+        for (double shift = 0; shift <= window / 4; shift += kAimError) {
+            for (const double point : {middle + shift, middle - shift}) {
+                if (entersOther(point, point, window)) continue;
+                approach(point, window);
+                return;
+            }
+        }
+    }
+    // Wedged between boxes too big to come closer without entering one of them.
+    stopSteering();
+}

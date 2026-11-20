@@ -11,6 +11,10 @@
 class AndroidCommandScreen;
 class AndroidPointerInput;
 
+namespace Dasher {
+class CDasherNode;
+}
+
 /**
  * @brief RAII wrapper that constructs and loads the XML settings store.
  *
@@ -57,10 +61,12 @@ class AndroidDasherInterface final
 {
 public:
     /**
-     * @param filesDir Absolute path to the app-private directory used for settings and model
-     *                 cache files.
+     * @param filesDir  Absolute path to the app-private directory used for settings and model
+     *                  cache files.
+     * @param languages Languages to predict for (see LanguageSet.h).  They decide the alphabet
+     *                  and the text the language model is trained on.
      */
-    explicit AndroidDasherInterface(const std::string &filesDir);
+    AndroidDasherInterface(const std::string &filesDir, const std::string &languages);
     ~AndroidDasherInterface() override;
 
     /**
@@ -74,9 +80,8 @@ public:
     /**
      * @brief Notifies DasherCore of the rendering surface dimensions.
      *
-     * On the first call this also calls @c Realize() to complete engine initialisation and
-     * applies any pending alphabet change.  Subsequent calls resize the screen and notify
-     * the core.
+     * On the first call this also calls @c Realize() to complete engine initialisation.
+     * Subsequent calls resize the screen and notify the core.
      *
      * @param width  Surface width in pixels (must be > 0).
      * @param height Surface height in pixels (must be > 0).
@@ -116,20 +121,11 @@ public:
     std::vector<std::string> TakeFrameStrings();
 
     /**
-     * @brief Returns the Dasher alphabet identifier currently in use.
-     * @return Alphabet ID string (e.g. @c "English with limited punctuation").
+     * @brief Returns the languages this session predicts for.
+     * @return Canonical language set, e.g. @c "de+en" (see LanguageSet.h).  It is fixed when
+     *         the session is created.
      */
-    std::string GetAlphabetId() const;
-
-    /**
-     * @brief Requests a Dasher alphabet change.
-     *
-     * If the engine has not been realised yet the change is deferred until @ref SetScreenSize
-     * triggers @c Realize().
-     *
-     * @param alphabetId Target alphabet identifier; no-op if empty or already active.
-     */
-    void SetAlphabetId(const std::string &alphabetId);
+    const std::string &GetLanguages() const { return m_languages; }
 
     /**
      * @brief Returns the active language-model ID.
@@ -215,6 +211,28 @@ public:
      */
     std::string SetContext(const std::string &textBeforeCursor);
 
+    /**
+     * @brief Moves into the box of a symbol, as if the user had steered there.
+     *
+     * Used for spoken letters: over the next frames the view scrolls until the crosshair is
+     * level with the box of that symbol among those following the text written so far, and
+     * zooms until the crosshair is inside it, which writes the symbol.
+     * Call @ref Frame until @ref IsSteering returns false.  A touch cancels it.
+     *
+     * @param plainText What the symbol types: a letter, a punctuation mark, " " or "\n".
+     * @return False if the alphabet has no such symbol, or the engine is not realised.
+     */
+    bool SteerToSymbol(const std::string &plainText);
+
+    /**
+     * @brief Moves back out of the box of the symbol written last, which deletes it.
+     * @return False if no written symbol is left to move out of.
+     */
+    bool SteerBack();
+
+    /// @brief Whether a move started by @ref SteerToSymbol or @ref SteerBack is under way.
+    bool IsSteering() const { return m_steer.active; }
+
 protected:
     /** @brief Registers the @c AndroidPointerInput module with DasherCore. */
     void CreateModules() override;
@@ -233,6 +251,28 @@ private:
     bool m_realized = false;
     /// True while a touch press is actively driving Dasher.
     bool m_startedByTouch = false;
-    /// Alphabet ID to apply once the engine is realised.
-    std::string m_pendingAlphabetId;
+    /// Canonical language set of this session.
+    std::string m_languages;
+
+    /// A move into (or back out of) a symbol's box, made of scheduled scrolls and zooms.
+    struct Steering {
+        bool active = false;
+        bool back = false;
+        /// Symbol text of the box to enter; unused when moving back.
+        std::string symbol;
+        /// The symbol node the crosshair was in when the move started.  Only ever compared,
+        /// never dereferenced: DasherCore may delete nodes between frames.
+        const Dasher::CDasherNode *from = nullptr;
+        /// Frames the scroll or zoom scheduled last still takes.
+        int framesLeft = 0;
+        /// Scrolls and zooms scheduled so far.
+        int moves = 0;
+        /// Moving back: whether the zoom out of the last symbol's box was scheduled.
+        bool zoomedOut = false;
+    };
+    Steering m_steer;
+
+    /// Schedules the next scroll or zoom of @ref m_steer, or ends it when its box is reached.
+    void advanceSteering();
+    void stopSteering();
 };

@@ -13,6 +13,7 @@ import android.view.inputmethod.EditorInfo
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.LinearLayout
+import android.widget.Toast
 import com.janmurin.dashermobile.ui.DasherHostUi
 import com.janmurin.dashermobile.ui.DasherHostViews
 
@@ -60,8 +61,7 @@ class DasherImeService : InputMethodService() {
     private var hostViews: DasherHostViews? = null
     private var imeTextSink: DasherImeTextSink? = null
     private var tiltProvider: TiltInputProvider? = null
-    private var pendingStartupLanguage: DasherLanguage? = null
-    private var suppressLanguageSwitchCallback = false
+    private var voiceInput: VoiceInput? = null
     private var suppressLanguageModelCallback = false
     private var suppressModeSwitchCallback = false
     private var shouldResetBufferOnNextStart = true
@@ -103,9 +103,8 @@ class DasherImeService : InputMethodService() {
             editorInfoProvider = { currentInputEditorInfo },
             mayReadText = { mayCheckText(currentInputEditorInfo) }
         )
-        pendingStartupLanguage = restoredLanguage()
 
-        val localHost = DasherSessionCoordinator.registerHost(filesDir.absolutePath, assets)
+        val localHost = DasherSessionCoordinator.registerHost(filesDir.absolutePath, assets, languagesPref())
         if (localHost == null) {
             Log.e(TAG, "Failed to initialize native engine for IME host")
             return views.root
@@ -146,13 +145,15 @@ class DasherImeService : InputMethodService() {
                 val modeLabel = if (mode == InputMode.TILT) "TILT" else "TOUCH"
                 val stateLabel = if (paused) "PAUSED" else "RUNNING"
                 views.statusView.text = "$modeLabel | $stateLabel"
-                views.languageSpinner?.isEnabled = paused
                 views.languageModelSpinner?.isEnabled = paused
                 views.locateButton?.visibility = if (paused) View.VISIBLE else View.GONE
                 val showCanvasCalibrateButton = paused && mode == InputMode.TILT
                 views.canvasCalibrateButton.visibility = if (showCanvasCalibrateButton) View.VISIBLE else View.GONE
                 views.canvasCalibrateButton.isEnabled = showCanvasCalibrateButton
-                views.canvasView.showPauseOverlay = paused
+                views.dictationButton.visibility = if (paused) View.VISIBLE else View.GONE
+                views.lettersButton.visibility = if (paused) View.VISIBLE else View.GONE
+                // Moving by spoken letters, the engine is paused between two letters only.
+                views.canvasView.showPauseOverlay = paused && voiceInput?.mode != VoiceMode.LETTERS
                 
                 val switchChecked = mode == InputMode.TILT
                 if (views.modeSwitch?.isChecked != switchChecked) {
@@ -176,7 +177,6 @@ class DasherImeService : InputMethodService() {
 
         views.canvasView.onSurfaceSizeChanged = { width, height ->
             DasherSessionCoordinator.onSurfaceSizeChanged(localHost, width, height)
-            applyPendingLanguage(localHost)
             // The engine can only load text once it has a surface (realised).
             loadTextBeforeCursor()
         }
@@ -214,13 +214,12 @@ class DasherImeService : InputMethodService() {
             DasherSessionCoordinator.unpause(localHost)
         }
 
-        setupLanguageControls(views, localHost)
+        setupVoiceControls(views, localHost)
         setupLanguageModelControls(views, localHost)
         applyImeStartupState(localHost)
 
         if (views.canvasView.width > 0 && views.canvasView.height > 0) {
             DasherSessionCoordinator.onSurfaceSizeChanged(localHost, views.canvasView.width, views.canvasView.height)
-            applyPendingLanguage(localHost)
         }
 
         return views.root
@@ -235,7 +234,6 @@ class DasherImeService : InputMethodService() {
             selectionStart = attribute?.initialSelStart ?: -1
             selectionEnd = attribute?.initialSelEnd ?: -1
         }
-        pendingStartupLanguage = restoredLanguage()
         shouldResetBufferOnNextStart = true
         hostHandle?.let { applyImeStartupState(it) }
     }
@@ -245,7 +243,8 @@ class DasherImeService : InputMethodService() {
         val localHost = ensureHost() ?: return
         hostViews?.let { applyImeHeightSetting(it.root) }
         isInputViewActive = true
-        DasherSessionCoordinator.activateHost(localHost)
+        // Languages are chosen in the settings; a changed choice takes a fresh engine.
+        DasherSessionCoordinator.activateHost(localHost, languagesPref())
         DasherSessionCoordinator.setLearningEnabled(localHost, allowsLearning(info))
         applyImeStartupState(localHost)
         
@@ -264,6 +263,7 @@ class DasherImeService : InputMethodService() {
     override fun onFinishInputView(finishingInput: Boolean) {
         isInputViewActive = false
         cursorSyncHandler.removeCallbacks(cursorSyncRunnable)
+        voiceInput?.stop()
         tiltProvider?.unregister()
         hostHandle?.let {
             DasherSessionCoordinator.clearTiltInput(it)
@@ -320,6 +320,8 @@ class DasherImeService : InputMethodService() {
         cursorSyncHandler.removeCallbacks(cursorSyncRunnable)
         tiltProvider?.unregister()
         tiltProvider = null
+        voiceInput?.destroy()
+        voiceInput = null
         hostHandle?.let { DasherSessionCoordinator.unregisterHost(it) }
         hostHandle = null
         hostViews = null
@@ -354,53 +356,74 @@ class DasherImeService : InputMethodService() {
             DasherSessionCoordinator.setMovementSpeedPercent(localHost, prefSpeed)
         }
         
-        syncLanguageSelection()
         syncLanguageModelSelection()
-
-
-        applyPendingLanguage(localHost)
     }
 
-    private fun applyPendingLanguage(localHost: DasherSessionCoordinator.HostHandle) {
-        val startupLanguage = pendingStartupLanguage ?: return
-        if (DasherSessionCoordinator.setLanguage(localHost, startupLanguage)) {
-            pendingStartupLanguage = null
-            DasherPrefs.setLanguage(this, startupLanguage)
-            syncLanguageSelection()
-        }
-    }
-
-    private fun setupLanguageControls(views: DasherHostViews, localHost: DasherSessionCoordinator.HostHandle) {
-        val languages = listOf(DasherLanguage.ENGLISH, DasherLanguage.SLOVAK)
-        val adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_item,
-            languages.map {
-                if (it == DasherLanguage.SLOVAK) getString(R.string.language_slovak) else getString(R.string.language_english)
-            }
-        ).apply {
-            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        }
-        views.languageSpinner?.adapter = adapter
-        syncLanguageSelection()
-
-        views.languageSpinner?.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (suppressLanguageSwitchCallback) return
-                val selectedLanguage = languages[position]
-                val switched = DasherSessionCoordinator.setLanguage(localHost, selectedLanguage)
-                if (!switched) {
-                    syncLanguageSelection()
-                    return
+    /**
+     * Wires the two voice buttons: each switches its [VoiceMode] on, or off if it is on.
+     *
+     * Dictated text goes to the editor as it is; a spoken letter makes Dasher move into the
+     * letter's box, which writes it like any other letter written with Dasher.
+     */
+    private fun setupVoiceControls(views: DasherHostViews, localHost: DasherSessionCoordinator.HostHandle) {
+        val voice = VoiceInput(this, object : VoiceInput.Listener {
+            override fun onVoiceModeChanged(mode: VoiceMode?) {
+                views.showVoiceMode(mode)
+                views.canvasView.showPauseOverlay =
+                    DasherSessionCoordinator.isPaused() && mode != VoiceMode.LETTERS
+                views.canvasView.invalidate()
+                if (mode != VoiceMode.LETTERS) {
+                    DasherSessionCoordinator.cancelSteering(localHost)
                 }
-                pendingStartupLanguage = null
-                DasherPrefs.setLanguage(this@DasherImeService, selectedLanguage)
-                // The switch emptied the engine text; reload the text before the cursor.
-                loadTextBeforeCursor()
             }
 
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            override fun onVoiceHeard(mode: VoiceMode, alternatives: List<String>, language: DasherLanguage) {
+                if (!isInputViewActive) return
+                when (mode) {
+                    VoiceMode.DICTATION -> insertDictation(localHost, alternatives.first())
+                    VoiceMode.LETTERS -> DasherSessionCoordinator.steer(
+                        localHost,
+                        SpokenLetters.parse(alternatives, language)
+                    )
+                }
+            }
+
+            override fun onVoicePermissionNeeded() {
+                VoicePermissionActivity.open(this@DasherImeService)
+            }
+
+            override fun onVoiceUnavailable() {
+                Toast.makeText(this@DasherImeService, R.string.voice_unavailable, Toast.LENGTH_SHORT).show()
+            }
+        })
+        voiceInput = voice
+
+        fun toggle(mode: VoiceMode) {
+            if (voice.mode == mode) {
+                voice.stop()
+            } else {
+                voice.start(mode, VoiceInput.languageFor(languagesPrefSet()))
+            }
         }
+        views.dictationButton.setOnClickListener { toggle(VoiceMode.DICTATION) }
+        views.lettersButton.setOnClickListener { toggle(VoiceMode.LETTERS) }
+    }
+
+    /**
+     * Enters dictated text at the cursor, after a space if it follows a word, and has Dasher
+     * continue behind it.  Its words count for the personal dictionary like written ones.
+     */
+    private fun insertDictation(localHost: DasherSessionCoordinator.HostHandle, text: String) {
+        val inputConnection = currentInputConnection ?: return
+        val info = currentInputEditorInfo
+        DasherSessionCoordinator.requestPause(localHost)
+        val before = if (mayCheckText(info)) inputConnection.getTextBeforeCursor(1, 0)?.toString().orEmpty() else ""
+        val separator = if (before.isNotEmpty() && !before.last().isWhitespace()) " " else ""
+        inputConnection.commitText(separator + text, 1)
+        if (allowsLearning(info)) {
+            NativeBridge.nativeDictionaryLearn(filesDir.absolutePath, text, DasherSessionCoordinator.getLanguages())
+        }
+        loadTextBeforeCursor()
     }
 
     private fun setupLanguageModelControls(views: DasherHostViews, localHost: DasherSessionCoordinator.HostHandle) {
@@ -434,14 +457,6 @@ class DasherImeService : InputMethodService() {
 
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
-    }
-
-    private fun syncLanguageSelection() {
-        val views = hostViews ?: return
-        val selection = if (DasherSessionCoordinator.getLanguage() == DasherLanguage.SLOVAK) 1 else 0
-        suppressLanguageSwitchCallback = true
-        views.languageSpinner?.setSelection(selection, false)
-        suppressLanguageSwitchCallback = false
     }
 
     private fun syncLanguageModelSelection() {
@@ -595,9 +610,10 @@ class DasherImeService : InputMethodService() {
         }
     }
 
-    private fun restoredLanguage(): DasherLanguage {
-        return DasherPrefs.getLanguage(this)
-    }
+    /** The languages chosen in the settings. */
+    private fun languagesPrefSet(): Set<DasherLanguage> = DasherPrefs.getLanguages(this)
+
+    private fun languagesPref(): String = DasherLanguage.formatSet(languagesPrefSet())
 
     private fun applyImeHeightSetting(rootView: View) {
         val percent = DasherPrefs.getImeHeightPercent(this)

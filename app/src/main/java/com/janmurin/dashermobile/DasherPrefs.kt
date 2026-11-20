@@ -12,7 +12,7 @@ import android.content.Context
  * **Preference keys:**
  * | Key | Type | Default | Description |
  * |---|---|---|---|
- * | [KEY_LANGUAGE] | String | `"en"` | Active [DasherLanguage] |
+ * | [KEY_LANGUAGES] | String | `"en"` | Active [DasherLanguage]s, e.g. `"de+en"` |
  * | [KEY_LANGUAGE_MODEL] | String | `"ppm"` | Active [LanguageModel] |
  * | [KEY_INPUT_MODE] | String | `"touch"` | Active [InputMode] |
  * | [KEY_IME_HEIGHT_PERCENT] | Int | 40 | IME panel height as % of screen height (30–70) |
@@ -20,7 +20,9 @@ import android.content.Context
  */
 object DasherPrefs {
     const val PREFS_NAME = "dasher_mobile"
-    const val KEY_LANGUAGE = "selected_language"
+    const val KEY_LANGUAGES = "selected_languages"
+    /** The single language stored before several could be chosen; read if [KEY_LANGUAGES] is unset. */
+    private const val KEY_LEGACY_LANGUAGE = "selected_language"
     const val KEY_LANGUAGE_MODEL = "selected_language_model"
     const val KEY_INPUT_MODE = "selected_input_mode"
     const val KEY_IME_HEIGHT_PERCENT = "ime_height_percent"
@@ -33,18 +35,19 @@ object DasherPrefs {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     /**
-     * Returns the persisted [DasherLanguage], defaulting to [DasherLanguage.ENGLISH].
+     * Returns the languages Dasher predicts for, defaulting to [DasherLanguage.default].
      */
-    fun getLanguage(context: Context): DasherLanguage {
-        val value = prefs(context).getString(KEY_LANGUAGE, DasherLanguage.ENGLISH.preferenceValue)
-        return DasherLanguage.fromPreferenceValue(value)
+    fun getLanguages(context: Context): Set<DasherLanguage> {
+        val stored = prefs(context).getString(KEY_LANGUAGES, null)
+            ?: prefs(context).getString(KEY_LEGACY_LANGUAGE, null)
+        return DasherLanguage.parseSet(stored)
     }
 
     /**
-     * Persists the selected [DasherLanguage].
+     * Persists the languages Dasher predicts for; an empty set is stored as the default.
      */
-    fun setLanguage(context: Context, language: DasherLanguage) {
-        prefs(context).edit().putString(KEY_LANGUAGE, language.preferenceValue).apply()
+    fun setLanguages(context: Context, languages: Set<DasherLanguage>) {
+        prefs(context).edit().putString(KEY_LANGUAGES, DasherLanguage.formatSet(languages)).apply()
     }
 
     /**

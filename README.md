@@ -16,6 +16,36 @@ Android keeps a newly installed keyboard switched off: Dasher is listed in no ke
 
 Dasher then opens wherever you type. To use another keyboard again, use the keyboard button Android shows at the bottom of the screen while a keyboard is open, or **settings → keyboard** in Dasher Mobile. In Android's keyboard settings, the gear next to Dasher Mobile opens its settings.
 
+## Languages
+
+Dasher predicts for one or several languages at once, chosen under **Settings → Languages**: German, English, Spanish, French, Italian and Slovak. With several chosen, the boxes offer the letters of all of them, each accented letter next to its base letter, and one language model sizes them, trained on text of every chosen language. Which language is being written shows in the letters just written, so the model follows a switch of language within a few letters.
+
+A language's model starts from a training text, and one is included for each language. The English, German, French, Italian and Spanish texts are those of [DasherCore](https://github.com/dasher-project/DasherCore/tree/main/Data/training) (MIT licence): the English one comes with the `third_party/DasherCore` submodule, the others are copies in `app/src/main/assets/training/`. The Slovak one is the novel *Drak sa vracia* by Dobroslav Chrobák. To add a text of your own to a language's — your own writing, say — import a plain text file (UTF-8) under **Settings → Training texts**.
+
+A KenLM model belongs to one alphabet, so its file is named after the chosen languages: `kenlm_English with limited punctuation.binary` for English alone, `kenlm_Slovak.binary` for Slovak alone, and otherwise `kenlm_Dasher Mobile ` followed by the language codes, e.g. `kenlm_Dasher Mobile de+en.binary`. KenLM models do not learn.
+
+## Learning your words
+
+What you write is learned, in two ways, both kept across sessions:
+
+- **The text itself** is saved and the language model is trained on it whenever the keyboard starts.
+- **A personal dictionary** counts your words and phrases of two or three words. Words written at least twice and phrases written at least three times are added to the training text as often as you wrote them (up to 16 times), so the boxes of your own vocabulary grow.
+
+Both are tied to the languages that were chosen at the time, and are used whenever at least one of those languages is chosen. Under **Settings → Personal dictionary** you can see and delete what was counted, and add words and phrases yourself, either for the chosen languages or for all languages. *Forget everything learned* deletes the saved text and the counted entries; entries you added stay.
+
+Nothing is learned in password fields or where an app asks keyboards not to learn. PPM is the language model that learns.
+
+## Voice input
+
+Two buttons in the top right corner of the Dasher canvas, shown while Dasher is paused, switch a voice mode on and off:
+
+- **Dictation** (microphone): what you say is entered as text, and Dasher continues behind it.
+- **Spoken letters** (microphone with an A): say a letter and Dasher scrolls to that letter's box and zooms into it, which writes the letter. Say several letters in a row to write them one after the other.
+
+Spoken letters understands a letter by itself, by its name in the language spoken ("bee", "zed"; "Ypsilon", "Eszett") and by the NATO and German spelling alphabets ("bravo", "Berta"). Say "capital" ("gross") before a letter for upper case, "space" ("Leerzeichen") and the names of punctuation marks ("comma", "question mark"; "Komma", "Fragezeichen") for those, and "back" ("zurück") to delete the last letter. Letter names are known for English and German; in the other languages say the letter itself or a spelling-alphabet word.
+
+Speech is recognised by the device's speech recognition service, in the device's language if that is one of the chosen languages, else in the first chosen one. The app asks for the microphone permission the first time a voice mode is switched on.
+
 ---
 
 ## Dependencies
@@ -50,6 +80,28 @@ Dasher then opens wherever you type. To use another keyboard again, use the keyb
    ```
 
 CMake compiles the native libraries (`DasherCore`, `KenLM`) automatically as part of the Gradle build.
+
+## Tests
+
+Kotlin unit tests run on the JVM:
+
+```bash
+./gradlew testDebugUnitTest
+```
+
+The native layer (language sets, the personal dictionary, moving to a spoken letter) has its own tests, which build it together with DasherCore for the computer you are on, without the Android NDK:
+
+```bash
+cmake -S app/src/test/cpp -B build/native-tests
+```
+
+```bash
+cmake --build build/native-tests
+```
+
+```bash
+ctest --test-dir build/native-tests --output-on-failure
+```
 
 ## Nightly builds
 

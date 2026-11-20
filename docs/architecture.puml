@@ -41,11 +41,14 @@ package "Android / Kotlin" {
   rectangle "DasherImeTextSink" <<io>> as SINK
   rectangle "InputConnection" <<util>> as IC
   rectangle "KenlmModelFiles" <<util>> as KENLM
+  rectangle "VoiceInput\nSpokenLetters" <<sensor>> as VOICE
+  rectangle "TrainingTexts\nPersonalDictionary" <<util>> as LEARNED
 }
 
 package "Native / C++" {
   rectangle "jni_bridge.cpp" <<bridge>> as JNI
   rectangle "AndroidDasherInterface\nAndroidFileUtils" <<core>> as ADI
+  rectangle "LanguageSet\nPersonalDictionary" <<util>> as LANG
   rectangle "DasherCore" <<core>> as CORE
 }
 
@@ -73,5 +76,13 @@ IME --> SINK      : onTextChanged
 SINK --> IC       : commit/delete text
 
 KENLM ..> ADI : model files in filesDir
+
+VOICE --> MAIN : dictated text / spoken letters
+VOICE --> IME  : dictated text / spoken letters
+MAIN --> COORD : steer(handle, symbols)
+IME  --> COORD : steer(handle, symbols)
+
+LEARNED ..> BRIDGE : dictionary entries,\ntraining text files
+ADI --> LANG : alphabet for the languages,\nwords of learned text
 @enduml
 

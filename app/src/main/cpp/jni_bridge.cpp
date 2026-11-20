@@ -21,7 +21,8 @@
  * startup or while the engine is paused.
  */
 #include "AndroidDasherInterface.h"
-
+#include "AndroidFiles.h"
+#include "LanguageSet.h"
 
 #include <jni.h>
 #include <android/log.h>
@@ -29,16 +30,12 @@
 #include <android/asset_manager_jni.h>
 #include <algorithm>
 #include <cstdint>
+#include <ctime>
 #include <memory>
 #include <string>
 #include <vector>
 
 #define LOG_TAG "DasherJNI"
-
-namespace DasherAndroid {
-void SetAssetManager(AAssetManager *assetManager);
-void SetUserDataDir(const std::string &userDataDir);
-}
 
 namespace {
 
@@ -56,9 +53,19 @@ struct NativeSession {
     float touchY = 0.0f;         ///< Last known touch Y (used for fallback rendering).
     bool touchActive = false;     ///< @c true while a finger is on screen.
 
-    explicit NativeSession(const std::string &filesDir)
-        : iface(std::make_unique<AndroidDasherInterface>(filesDir)) {}
+    NativeSession(const std::string &filesDir, const std::string &languages)
+        : iface(std::make_unique<AndroidDasherInterface>(filesDir, languages)) {}
 };
+
+/// @brief Copies a Java string; empty if it is null.
+static std::string toStdString(JNIEnv *env, jstring text) {
+    if (!text) return {};
+    const char *chars = env->GetStringUTFChars(text, nullptr);
+    if (!chars) return {};
+    std::string copy(chars);
+    env->ReleaseStringUTFChars(text, chars);
+    return copy;
+}
 
 /**
  * @brief Converts a @c jlong handle back to a @c NativeSession pointer.
@@ -256,20 +263,19 @@ Java_com_janmurin_dashermobile_NativeBridge_nativeVersion(JNIEnv *env, jclass) {
  * Allocates a @c NativeSession on the heap and registers @p filesDir as the user-data
  * directory with the Android file-utils layer.
  *
- * @param filesDir UTF-8 path to the app's private files directory.
+ * @param filesDir  UTF-8 path to the app's private files directory.
+ * @param languages Languages to predict for, e.g. "de+en" (see LanguageSet.h).
  * @return Opaque handle (non-zero on success, 0 on failure).
  */
 JNIEXPORT jlong JNICALL
-Java_com_janmurin_dashermobile_NativeBridge_nativeCreate(JNIEnv *env, jclass, jstring filesDir) {
-    const char *dir = env->GetStringUTFChars(filesDir, nullptr);
-    if (!dir) {
+Java_com_janmurin_dashermobile_NativeBridge_nativeCreate(JNIEnv *env, jclass, jstring filesDir, jstring languages) {
+    const std::string dirStr = toStdString(env, filesDir);
+    if (dirStr.empty()) {
         return 0L;
     }
-    std::string dirStr(dir);
-    env->ReleaseStringUTFChars(filesDir, dir);
 
-    auto *session = new NativeSession(dirStr);
     DasherAndroid::SetUserDataDir(dirStr);
+    auto *session = new NativeSession(dirStr, toStdString(env, languages));
     __android_log_print(ANDROID_LOG_INFO, LOG_TAG, "nativeCreate handle=%p", static_cast<void *>(session));
     return toHandle(session);
 }
@@ -369,34 +375,16 @@ Java_com_janmurin_dashermobile_NativeBridge_nativeTouch(JNIEnv *,
     session->iface->SetTouch(static_cast<int>(action), static_cast<float>(x), static_cast<float>(y));
 }
 
-/** @brief JNI binding for @c NativeBridge.nativeGetAlphabetId. Returns the active alphabet ID. */
+/** @brief JNI binding for @c NativeBridge.nativeGetLanguages. Returns the session's language set. */
 JNIEXPORT jstring JNICALL
-Java_com_janmurin_dashermobile_NativeBridge_nativeGetAlphabetId(JNIEnv *env,
-                                                                  jclass,
-                                                                  jlong handle) {
+Java_com_janmurin_dashermobile_NativeBridge_nativeGetLanguages(JNIEnv *env,
+                                                                 jclass,
+                                                                 jlong handle) {
     auto *session = fromHandle(handle);
     if (!session || !session->iface) {
         return env->NewStringUTF("");
     }
-    return env->NewStringUTF(session->iface->GetAlphabetId().c_str());
-}
-
-/** @brief JNI binding for @c NativeBridge.nativeSetAlphabetId. Switches the Dasher alphabet. */
-JNIEXPORT void JNICALL
-Java_com_janmurin_dashermobile_NativeBridge_nativeSetAlphabetId(JNIEnv *env,
-                                                                  jclass,
-                                                                  jlong handle,
-                                                                  jstring alphabetId) {
-    auto *session = fromHandle(handle);
-    if (!session || !session->iface || !alphabetId) {
-        return;
-    }
-    const char *rawAlphabetId = env->GetStringUTFChars(alphabetId, nullptr);
-    if (!rawAlphabetId) {
-        return;
-    }
-    session->iface->SetAlphabetId(rawAlphabetId);
-    env->ReleaseStringUTFChars(alphabetId, rawAlphabetId);
+    return env->NewStringUTF(session->iface->GetLanguages().c_str());
 }
 
 /** @brief JNI binding for @c NativeBridge.nativeGetLanguageModelId. */
@@ -586,6 +574,126 @@ Java_com_janmurin_dashermobile_NativeBridge_nativeSetLearningEnabled(JNIEnv *,
         return;
     }
     session->iface->SetLearningEnabled(enabled == JNI_TRUE);
+}
+
+/** @brief JNI binding for @c NativeBridge.nativeAlphabetIdFor. Names the alphabet of a language set. */
+JNIEXPORT jstring JNICALL
+Java_com_janmurin_dashermobile_NativeBridge_nativeAlphabetIdFor(JNIEnv *env, jclass, jstring languages) {
+    const auto parsed = DasherAndroid::ParseLanguages(toStdString(env, languages));
+    return env->NewStringUTF(DasherAndroid::AlphabetIdFor(parsed).c_str());
+}
+
+/** @brief JNI binding for @c NativeBridge.nativeCorpusAssetFor. Names a language's bundled training text. */
+JNIEXPORT jstring JNICALL
+Java_com_janmurin_dashermobile_NativeBridge_nativeCorpusAssetFor(JNIEnv *env, jclass, jstring language) {
+    return env->NewStringUTF(DasherAndroid::CorpusAssetFor(toStdString(env, language)).c_str());
+}
+
+/** @brief JNI binding for @c NativeBridge.nativeImportedCorpusFileFor. Names the file a training text is imported to. */
+JNIEXPORT jstring JNICALL
+Java_com_janmurin_dashermobile_NativeBridge_nativeImportedCorpusFileFor(JNIEnv *env, jclass, jstring language) {
+    return env->NewStringUTF(DasherAndroid::ImportedCorpusFileFor(toStdString(env, language)).c_str());
+}
+
+/** @brief JNI binding for @c NativeBridge.nativeSteerToSymbol. Starts moving into a symbol's box. */
+JNIEXPORT jboolean JNICALL
+Java_com_janmurin_dashermobile_NativeBridge_nativeSteerToSymbol(JNIEnv *env,
+                                                                  jclass,
+                                                                  jlong handle,
+                                                                  jstring text) {
+    auto *session = fromHandle(handle);
+    if (!session || !session->iface) {
+        return JNI_FALSE;
+    }
+    return session->iface->SteerToSymbol(toStdString(env, text)) ? JNI_TRUE : JNI_FALSE;
+}
+
+/** @brief JNI binding for @c NativeBridge.nativeSteerBack. Starts moving out of the last symbol's box. */
+JNIEXPORT jboolean JNICALL
+Java_com_janmurin_dashermobile_NativeBridge_nativeSteerBack(JNIEnv *, jclass, jlong handle) {
+    auto *session = fromHandle(handle);
+    if (!session || !session->iface) {
+        return JNI_FALSE;
+    }
+    return session->iface->SteerBack() ? JNI_TRUE : JNI_FALSE;
+}
+
+/** @brief JNI binding for @c NativeBridge.nativeIsSteering. */
+JNIEXPORT jboolean JNICALL
+Java_com_janmurin_dashermobile_NativeBridge_nativeIsSteering(JNIEnv *, jclass, jlong handle) {
+    auto *session = fromHandle(handle);
+    return session && session->iface && session->iface->IsSteering() ? JNI_TRUE : JNI_FALSE;
+}
+
+/**
+ * @brief JNI binding for @c NativeBridge.nativeDictionaryEntries.
+ *
+ * @return One string per personal dictionary entry, the most often written first:
+ *         count, "1" if added by hand else "0", language set and text, separated by tabs.
+ */
+JNIEXPORT jobjectArray JNICALL
+Java_com_janmurin_dashermobile_NativeBridge_nativeDictionaryEntries(JNIEnv *env, jclass, jstring filesDir) {
+    DasherAndroid::SetUserDataDir(toStdString(env, filesDir));
+    const auto entries = DasherAndroid::Dictionary().Entries();
+    jclass stringClass = env->FindClass("java/lang/String");
+    jobjectArray result = env->NewObjectArray(static_cast<jsize>(entries.size()), stringClass, nullptr);
+    for (size_t i = 0; i < entries.size(); ++i) {
+        const auto &entry = entries[i];
+        const std::string line = std::to_string(entry.count) + "\t" + (entry.manual ? "1" : "0") + "\t"
+            + entry.languages + "\t" + entry.text;
+        jstring item = env->NewStringUTF(line.c_str());
+        env->SetObjectArrayElement(result, static_cast<jsize>(i), item);
+        env->DeleteLocalRef(item);
+    }
+    return result;
+}
+
+/** @brief JNI binding for @c NativeBridge.nativeDictionaryAdd. Adds an entry by hand. */
+JNIEXPORT jboolean JNICALL
+Java_com_janmurin_dashermobile_NativeBridge_nativeDictionaryAdd(JNIEnv *env,
+                                                                  jclass,
+                                                                  jstring filesDir,
+                                                                  jstring text,
+                                                                  jstring languages) {
+    DasherAndroid::SetUserDataDir(toStdString(env, filesDir));
+    auto &dictionary = DasherAndroid::Dictionary();
+    const bool added = dictionary.Add(toStdString(env, text), toStdString(env, languages),
+                                      static_cast<long long>(std::time(nullptr)));
+    return added && dictionary.Save() ? JNI_TRUE : JNI_FALSE;
+}
+
+/** @brief JNI binding for @c NativeBridge.nativeDictionaryRemove. Removes an entry. */
+JNIEXPORT jboolean JNICALL
+Java_com_janmurin_dashermobile_NativeBridge_nativeDictionaryRemove(JNIEnv *env,
+                                                                     jclass,
+                                                                     jstring filesDir,
+                                                                     jstring text,
+                                                                     jstring languages) {
+    DasherAndroid::SetUserDataDir(toStdString(env, filesDir));
+    auto &dictionary = DasherAndroid::Dictionary();
+    const bool removed = dictionary.Remove(toStdString(env, text), toStdString(env, languages));
+    return removed && dictionary.Save() ? JNI_TRUE : JNI_FALSE;
+}
+
+/** @brief JNI binding for @c NativeBridge.nativeDictionaryLearn. Counts the words of dictated text. */
+JNIEXPORT void JNICALL
+Java_com_janmurin_dashermobile_NativeBridge_nativeDictionaryLearn(JNIEnv *env,
+                                                                    jclass,
+                                                                    jstring filesDir,
+                                                                    jstring text,
+                                                                    jstring languages) {
+    DasherAndroid::SetUserDataDir(toStdString(env, filesDir));
+    auto &dictionary = DasherAndroid::Dictionary();
+    const std::string set = DasherAndroid::JoinLanguages(DasherAndroid::ParseLanguages(toStdString(env, languages)));
+    dictionary.Learn(toStdString(env, text), set, static_cast<long long>(std::time(nullptr)));
+    dictionary.Save();
+}
+
+/** @brief JNI binding for @c NativeBridge.nativeForgetLearned. Deletes everything learned from the user. */
+JNIEXPORT void JNICALL
+Java_com_janmurin_dashermobile_NativeBridge_nativeForgetLearned(JNIEnv *env, jclass, jstring filesDir) {
+    DasherAndroid::SetUserDataDir(toStdString(env, filesDir));
+    DasherAndroid::ForgetLearnedText();
 }
 
 }

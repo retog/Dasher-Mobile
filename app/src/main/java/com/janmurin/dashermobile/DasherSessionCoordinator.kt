@@ -50,17 +50,23 @@ object DasherSessionCoordinator {
     private var engineHostId: Int? = null
     private val hostSessions = mutableMapOf<Int, HostSession>()
     private var activeHostId: Int? = null
+    /** Languages the engine is to predict for, as written by [DasherLanguage.formatSet]. */
+    private var languages = DasherLanguage.formatSet(DasherLanguage.default)
+    /** Whether what the engine was trained on has changed since it was created. */
+    private var engineStale = false
 
     /**
      * Registers a new host client and, if no native session exists yet, creates one.
      *
      * @param filesDirPath Absolute path to the host's private files directory.
      * @param assets       [AssetManager] from the host context; passed to the native engine so
-     *                     DasherCore can read bundled alphabet XML files.
+     *                     DasherCore can read bundled colour schemes and training texts.
+     * @param languages    Languages to predict for, as written by [DasherLanguage.formatSet].
      * @return A [HostHandle] on success, or `null` if the native session could not be created.
      */
-    fun registerHost(filesDirPath: String, assets: AssetManager): HostHandle? {
+    fun registerHost(filesDirPath: String, assets: AssetManager, languages: String): HostHandle? {
         synchronized(lock) {
+            if (engine == null) this.languages = languages
             val handle = HostHandle(nextHostId++)
             hostSessions[handle.id] = HostSession(
                 filesDirPath = filesDirPath,
@@ -114,24 +120,31 @@ object DasherSessionCoordinator {
      * Makes [host] the active host: wires its callbacks, restores surface size and starts
      * the Choreographer frame loop.
      *
-     * If the engine was created for a different host it is destroyed and a fresh one is created
-     * for [host].
+     * If the engine was created for a different host or for other languages, or what it was
+     * trained on has changed (see [invalidateEngine]), it is destroyed and a fresh one is
+     * created for [host].  A fresh engine is trained when it gets its surface, on the main
+     * thread.
      *
-     * @param host The [HostHandle] that should become active.
+     * @param host      The [HostHandle] that should become active.
+     * @param languages Languages to predict for, as written by [DasherLanguage.formatSet].
+     * @return `true` if a fresh engine was created, which starts with an empty text.
      */
-    fun activateHost(host: HostHandle) {
+    fun activateHost(host: HostHandle, languages: String): Boolean {
         synchronized(lock) {
-            val session = hostSessions[host.id] ?: return
+            val session = hostSessions[host.id] ?: return false
+            this.languages = languages
 
             val existingEngine = engine
-            if (existingEngine != null && engineHostId == host.id) {
+            val reusable = engineHostId == host.id && !engineStale &&
+                existingEngine?.getLanguages() == languages
+            if (existingEngine != null && reusable) {
                 activeHostId = host.id
                 bindCallbacks(existingEngine, host.id)
                 if (session.surfaceWidth > 0 && session.surfaceHeight > 0) {
                     existingEngine.onSurfaceSizeChanged(session.surfaceWidth, session.surfaceHeight)
                 }
                 existingEngine.start()
-                return
+                return false
             }
 
             engine?.let { existing ->
@@ -145,7 +158,7 @@ object DasherSessionCoordinator {
                 nativeHandle = 0L
                 engineHostId = null
                 activeHostId = null
-                return
+                return false
             }
 
             engine = localEngine
@@ -156,6 +169,18 @@ object DasherSessionCoordinator {
                 localEngine.onSurfaceSizeChanged(session.surfaceWidth, session.surfaceHeight)
             }
             localEngine.start()
+            return true
+        }
+    }
+
+    /**
+     * Tells the coordinator that what an engine is trained on has changed: a training text
+     * was imported, the personal dictionary was edited or learned text was deleted.  The next
+     * [activateHost] then creates a fresh engine.
+     */
+    fun invalidateEngine() {
+        synchronized(lock) {
+            engineStale = true
         }
     }
 
@@ -269,10 +294,13 @@ object DasherSessionCoordinator {
         }
     }
 
-    /** Returns the active [DasherLanguage], falling back to [DasherLanguage.ENGLISH]. */
-    fun getLanguage(): DasherLanguage {
+    /**
+     * Returns the languages the engine predicts for, as written by [DasherLanguage.formatSet];
+     * without an engine, those the next one will be created for.
+     */
+    fun getLanguages(): String {
         synchronized(lock) {
-            return engine?.getLanguage() ?: DasherLanguage.ENGLISH
+            return engine?.getLanguages()?.takeIf { it.isNotEmpty() } ?: languages
         }
     }
 
@@ -398,14 +426,21 @@ object DasherSessionCoordinator {
     }
 
     /**
-     * Attempts to switch the language on the engine if [host] is active.
-     *
-     * @return `true` if the language was changed.
+     * Writes the given symbols, one after the other, as if the user had steered into their
+     * boxes, if [host] is active and the engine is paused; see [DasherEngine.steer].
      */
-    fun setLanguage(host: HostHandle, language: DasherLanguage): Boolean {
+    fun steer(host: HostHandle, symbols: List<String>) {
         synchronized(lock) {
-            if (activeHostId != host.id) return false
-            return engine?.setLanguage(language) == true
+            if (activeHostId != host.id) return
+            engine?.steer(symbols)
+        }
+    }
+
+    /** Stops writing symbols given to [steer]. */
+    fun cancelSteering(host: HostHandle) {
+        synchronized(lock) {
+            if (activeHostId != host.id) return
+            engine?.cancelSteering()
         }
     }
 
@@ -434,10 +469,12 @@ object DasherSessionCoordinator {
     }
 
     private fun createEngine(filesDirPath: String, assets: AssetManager): DasherEngine? {
-        val createdHandle = NativeBridge.nativeCreate(filesDirPath)
+        // The native layer keeps one language set: the old session must be gone by now.
+        val createdHandle = NativeBridge.nativeCreate(filesDirPath, languages)
         if (createdHandle == 0L) {
             return null
         }
+        engineStale = false
         NativeBridge.nativeSetAssetManager(createdHandle, assets)
         nativeHandle = createdHandle
         return DasherEngine(createdHandle) { _, _ -> }
