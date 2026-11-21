@@ -39,10 +39,12 @@ Nothing is learned in password fields or where an app asks keyboards not to lear
 
 Two buttons in the top right corner of the Dasher canvas, shown while Dasher is paused, switch a voice mode on and off:
 
-- **Dictation** (microphone): what you say is entered as text, and Dasher continues behind it.
+- **Dictation** (microphone): what you say is entered as text, and Dasher continues behind it. As the keyboard, Dasher hands over to the phone's own voice typing (such as Google voice typing) if one is switched on in Android's keyboard settings, and gets the keyboard back when you are done; otherwise, and in the app, it listens itself.
 - **Spoken letters** (microphone with an A): say a letter and Dasher scrolls to that letter's box and zooms into it, which writes the letter. Say several letters in a row to write them one after the other.
 
 Spoken letters understands a letter by itself, by its name in the language spoken ("bee", "zed"; "Ypsilon", "Eszett") and by the NATO and German spelling alphabets ("bravo", "Berta"). Say "capital" ("gross") before a letter for upper case, "space" ("Leerzeichen") and the names of punctuation marks ("comma", "question mark"; "Komma", "Fragezeichen") for those, and "back" ("zurück") to delete the last letter. Letter names are known for English and German; in the other languages say the letter itself or a spelling-alphabet word.
+
+While a voice mode is on, a line at the top of the canvas shows what was heard and, for spoken letters, what was made of it (a `?` if it could not be read as letters). If the recognition service refuses to listen, a message gives its error number.
 
 Speech is recognised by the device's speech recognition service, in the device's language if that is one of the chosen languages, else in the first chosen one. The app asks for the microphone permission the first time a voice mode is switched on.
 

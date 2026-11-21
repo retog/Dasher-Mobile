@@ -201,11 +201,15 @@ class MainActivity : ComponentActivity() {
                 override fun onVoiceHeard(mode: VoiceMode, alternatives: List<String>, language: DasherLanguage) {
                     if (!isResumed) return
                     when (mode) {
-                        VoiceMode.DICTATION -> appendDictation(localHost, alternatives.first())
-                        VoiceMode.LETTERS -> DasherSessionCoordinator.steer(
-                            localHost,
-                            SpokenLetters.parse(alternatives, language)
-                        )
+                        VoiceMode.DICTATION -> {
+                            hostViews.voiceStatusView.text = alternatives.first()
+                            appendDictation(localHost, alternatives.first())
+                        }
+                        VoiceMode.LETTERS -> {
+                            val symbols = SpokenLetters.parse(alternatives, language)
+                            hostViews.showSpokenLetters(alternatives.first(), symbols)
+                            DasherSessionCoordinator.steer(localHost, symbols)
+                        }
                     }
                 }
 
@@ -213,8 +217,8 @@ class MainActivity : ComponentActivity() {
                     VoicePermissionActivity.open(this@MainActivity)
                 }
 
-                override fun onVoiceUnavailable() {
-                    Toast.makeText(this@MainActivity, R.string.voice_unavailable, Toast.LENGTH_SHORT).show()
+                override fun onVoiceUnavailable(error: Int) {
+                    Toast.makeText(this@MainActivity, voiceUnavailableMessage(this@MainActivity, error), Toast.LENGTH_LONG).show()
                 }
             })
             voiceInput = voice

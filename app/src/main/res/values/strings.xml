@@ -46,7 +46,10 @@
     <string name="icon_voice_dictation">Dictate</string>
     <string name="icon_voice_letters">Move by spoken letters</string>
     <string name="icon_delete">Delete</string>
-    <string name="voice_unavailable">Speech cannot be recognised on this device right now.</string>
+    <string name="voice_unavailable">Speech cannot be recognised right now (recogniser error %1$d).</string>
+    <string name="voice_no_recognizer">This device has no speech recognition service.</string>
+    <string name="voice_listening">Listening…</string>
+    <string name="voice_heard_letters">“%1$s” → %2$s</string>
     <string name="training_texts_hint">Dasher learns which letters follow which from a text in each language, and comes with one for each. You can add a text of your own to a language\'s: import a plain text file (UTF-8).</string>
     <string name="training_text_bundled">Included</string>
     <string name="training_text_imported">Imported</string>

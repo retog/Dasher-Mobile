@@ -21,6 +21,7 @@ import androidx.core.content.res.ResourcesCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
+import com.janmurin.dashermobile.DasherEngine
 import com.janmurin.dashermobile.HostMode
 import com.janmurin.dashermobile.R
 import com.janmurin.dashermobile.VoiceMode
@@ -50,6 +51,8 @@ import com.janmurin.dashermobile.VoiceMode
  *                                ([com.janmurin.dashermobile.VoiceMode.DICTATION]).
  * @property lettersButton        Button overlaid on the canvas that switches moving by spoken
  *                                letters on and off ([com.janmurin.dashermobile.VoiceMode.LETTERS]).
+ * @property voiceStatusView      Line at the top of the canvas, shown while a voice mode is on,
+ *                                that says what was heard.
  * @property keyboardBanner       Hidden banner below the top bar, for setting up Dasher as the
  *                                system keyboard; `null` outside APP mode.
  */
@@ -67,14 +70,42 @@ data class DasherHostViews(
     val locateButton: ImageView?,
     val dictationButton: ImageView,
     val lettersButton: ImageView,
+    val voiceStatusView: TextView,
     val keyboardBanner: TextView?
 ) {
+    /**
+     * Shows what was heard in the spoken-letters mode and what was made of it: the letters
+     * written, or a question mark if it could not be read as letters.
+     *
+     * @param heard   What the recogniser heard.
+     * @param symbols What [com.janmurin.dashermobile.SpokenLetters.parse] read it as.
+     */
+    fun showSpokenLetters(heard: String, symbols: List<String>) {
+        val read = if (symbols.isEmpty()) {
+            "?"
+        } else {
+            symbols.joinToString(" ") {
+                when (it) {
+                    DasherEngine.STEER_BACK -> "⌫"
+                    " " -> "␣"
+                    "\n" -> "⏎"
+                    else -> it
+                }
+            }
+        }
+        voiceStatusView.text = voiceStatusView.context.getString(R.string.voice_heard_letters, heard, read)
+    }
+
     /**
      * Shows which voice mode is on, by the colour of its button.
      *
      * @param mode The mode that is on, or `null` if none is.
      */
     fun showVoiceMode(mode: VoiceMode?) {
+        voiceStatusView.visibility = if (mode == null) View.GONE else View.VISIBLE
+        if (mode != null) {
+            voiceStatusView.setText(R.string.voice_listening)
+        }
         dictationButton.setBackgroundResource(
             if (mode == VoiceMode.DICTATION) R.drawable.button_background_active else R.drawable.button_background
         )
@@ -302,6 +333,26 @@ object DasherHostUi {
             isFocusable = true
         }.also(canvasFrame::addView)
 
+        // While a voice mode is on, a line at the top of the canvas says what was heard.
+        val voiceStatusView = TextView(context).apply {
+            setTextColor(0xFFFFFFFF.toInt())
+            setBackgroundColor(0xCC000000.toInt())
+            textSize = 13f
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.START
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                topMargin = dp(12)
+                leftMargin = dp(64)
+                rightMargin = dp(64)
+            }
+            visibility = View.GONE
+        }.also(canvasFrame::addView)
+
         val dictationButton = voiceButton(R.drawable.mic_24px, R.string.icon_voice_dictation, 0)
         val lettersButton = voiceButton(R.drawable.mic_letters_24px, R.string.icon_voice_letters, 1)
 
@@ -457,6 +508,7 @@ object DasherHostUi {
             locateButton = locateButton,
             dictationButton = dictationButton,
             lettersButton = lettersButton,
+            voiceStatusView = voiceStatusView,
             keyboardBanner = keyboardBanner
         )
     }

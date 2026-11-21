@@ -11,6 +11,7 @@
 
 #include <android/asset_manager.h>
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -285,16 +286,35 @@ void steer(AndroidDasherInterface &dasher, long &timeMs, const std::string &text
 
 /// Steers through a longer text, checking after every frame that nothing but the letters asked
 /// for was written, not even in passing.
-void testSteeringWritesOnlyWhatIsAsked(const std::string &dir) {
+void testSteeringWritesOnlyWhatIsAsked(const std::string &dir, int width, int height, bool touchFirst) {
     const std::string text =
         "Quer durch Zürich: fünf Bären (groß), Öl & Käse? Nie! "
         "Ťažký kôň šiel dnu; žltá ruža \"kvitne\" - vraj. "
         "Xylophon, Jazz, Whisky; qqq zzz ÄÖÜ";
     AndroidDasherInterface dasher(dir, "de+sk");
-    dasher.SetScreenSize(1080, 700);
-    long timeMs = 500000;
+    dasher.SetScreenSize(width, height);
+    // Touches are timed by the clock, so the frames have to be as well.
+    long timeMs = static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
     dasher.Frame(timeMs += 16);
     dasher.TakeFrameStrings();
+    if (touchFirst) {
+        // Write something by touch, as a user does before switching spoken letters on, and
+        // start from an empty text again.
+        dasher.SetTouch(0, width * 0.8f, height * 0.4f);
+        for (int frame = 0; frame < 1500 && dasher.GetOutputText().size() < 3; ++frame) {
+            dasher.SetTouch(1, width * 0.8f, height * 0.4f);
+            dasher.Frame(timeMs += 16);
+            dasher.TakeFrameStrings();
+        }
+        dasher.SetTouch(2, width * 0.8f, height * 0.4f);
+        dasher.Frame(timeMs += 16);
+        dasher.TakeFrameStrings();
+        CHECK(!dasher.GetOutputText().empty());
+        dasher.ResetOutputText();
+        dasher.Frame(timeMs += 16);
+        dasher.TakeFrameStrings();
+    }
 
     std::string written;
     int frames = 0;
@@ -486,7 +506,10 @@ int main() {
     testTrainingSegments();
     DasherAndroid::SetUserDataDir(dir);
     testSession(dir);
-    testSteeringWritesOnlyWhatIsAsked(dir);
+    testSteeringWritesOnlyWhatIsAsked(dir, 1080, 700, false);
+    // A phone held upright: the keyboard's canvas, and the app's taller one.
+    testSteeringWritesOnlyWhatIsAsked(dir, 1080, 800, true);
+    testSteeringWritesOnlyWhatIsAsked(dir, 1080, 1700, true);
 
     if (g_failures == 0) {
         std::cout << "all native tests passed" << std::endl;

@@ -621,6 +621,9 @@ constexpr double kFinalShare = 0.6;
 /// A box inside it is entered too if it fills more than half the screen; stay clear of any that
 /// comes close.
 constexpr double kSafeChildShare = 0.45;
+/// Share of the screen height the box moved into fills when brought as close as does not enter
+/// it yet.
+constexpr double kNearShare = 0.45;
 /// Share of the screen height a box fills after a zoom that only brings it closer.
 constexpr double kApproachShare = 0.15;
 /// Height, in Dasher coordinates, below which a box is first brought closer.  Zooms are given
@@ -780,21 +783,44 @@ void collectSymbols(Dasher::CDasherModel *model, Dasher::CDasherNode *parent, do
     }
 }
 
+/// Whether a box inside the one moved into would be entered with it: one filling close to half
+/// the screen when the move ends.
+bool tooBig(const SymbolBox &box) {
+    return (box.to - box.from) * kFinalShare >= kSafeChildShare;
+}
+
+/// Whether the crosshair can be at a point of a box, given as a share of its height, when the
+/// move into the box ends, without a box inside it being entered as well.
+bool safeAt(const std::vector<SymbolBox> &boxes, double share) {
+    if (share <= 0.01 || share >= 0.99) return false;
+    for (const SymbolBox &box : boxes) {
+        if (box.from <= share && share < box.to && tooBig(box)) return false;
+    }
+    return true;
+}
+
 /// The point of a box, as a share of its height, to put the crosshair on so that no box inside
-/// it is entered as well: its middle, unless a box there would fill half the screen.
+/// it is entered as well: its middle if that will do, else the middle of the widest stretch of
+/// boxes that will.  Often one box takes nearly all of it, the space after a comma or the "u"
+/// after a "q", and all others together are the only place left.
 double safePoint(const std::vector<SymbolBox> &boxes) {
-    const auto tooBig = [](const SymbolBox &box) {
-        return (box.to - box.from) * kFinalShare >= kSafeChildShare;
+    if (safeAt(boxes, 0.5)) return 0.5;
+    double best = 0.5;
+    double bestWidth = 0;
+    double from = 0;
+    const auto close = [&](double to) {
+        if (to - from > bestWidth) {
+            bestWidth = to - from;
+            best = (from + to) / 2;
+        }
     };
     for (const SymbolBox &box : boxes) {
-        if (box.from <= 0.5 && 0.5 < box.to && !tooBig(box)) return 0.5;
+        if (!tooBig(box)) continue;
+        close(box.from);
+        from = box.to;
     }
-    const SymbolBox *best = nullptr;
-    for (const SymbolBox &box : boxes) {
-        if (tooBig(box)) continue;
-        if (!best || box.to - box.from > best->to - best->from) best = &box;
-    }
-    return best ? (best->from + best->to) / 2 : 0.5;
+    close(1.0);
+    return best;
 }
 
 }
@@ -959,12 +985,18 @@ void AndroidDasherInterface::advanceSteering() {
     // coordinates around it: in one movement if no other box is entered on the way, else
     // the scroll first, at a scale where the boxes are smaller.
     const auto approach = [&](double point, double window) {
-        const bool level = std::abs(point - kCrosshair) <= kAimError / 2;
-        if (level || !entersOther(kCrosshair, point, window)) {
-            move(level ? kCrosshair : point, window, kZoomFrames);
+        if (!entersOther(kCrosshair, point, window)) {
+            m_steer.scrolled = false;
+            move(point, window, kZoomFrames);
         } else {
+            m_steer.scrolled = true;
             move(point, screenHeight, kScrollFrames);
         }
+    };
+    // Zooms with the crosshair staying on the point it is on.
+    const auto zoomInPlace = [&](double window) {
+        m_steer.scrolled = false;
+        move(kCrosshair, window, kZoomFrames);
     };
 
     if (height >= kMinExactHeight) {
@@ -975,7 +1007,19 @@ void AndroidDasherInterface::advanceSteering() {
         for (const SymbolBox &box : inside) {
             spans.push_back({top + box.from * height, top + box.to * height, false});
         }
-        approach(top + safePoint(inside) * height, height / kFinalShare);
+        if (safeAt(inside, (kCrosshair - top) / height)) {
+            // The crosshair is level with a point of the box that will do.
+            zoomInPlace(height / kFinalShare);
+        } else if (!m_steer.scrolled) {
+            approach(top + safePoint(inside) * height, height / kFinalShare);
+        } else if (height < kNearShare * screenHeight * 0.9) {
+            // A scroll ends a few coordinates off, here too far off for so narrow a place.
+            // Bring the box as close as does not enter it yet, and aim again.
+            m_steer.scrolled = false;
+            move(top + safePoint(inside) * height, height / kNearShare, kZoomFrames);
+        } else {
+            stopSteering();
+        }
         return;
     }
 
@@ -986,7 +1030,12 @@ void AndroidDasherInterface::advanceSteering() {
         for (double shift = 0; shift <= window / 4; shift += kAimError) {
             for (const double point : {middle + shift, middle - shift}) {
                 if (entersOther(point, point, window)) continue;
-                approach(point, window);
+                if (std::abs(point - kCrosshair) <= window / 4 && !entersOther(kCrosshair, kCrosshair, window)) {
+                    // Near enough for the box to stay on the screen.
+                    zoomInPlace(window);
+                } else {
+                    approach(point, window);
+                }
                 return;
             }
         }

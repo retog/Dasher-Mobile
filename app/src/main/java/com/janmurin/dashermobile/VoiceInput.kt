@@ -54,12 +54,19 @@ class VoiceInput(private val context: Context, private val listener: Listener) {
         /** The microphone may not be used yet; the host should ask for the permission. */
         fun onVoicePermissionNeeded()
 
-        /** Listening ended because speech cannot be recognised (no recogniser, no network). */
-        fun onVoiceUnavailable()
+        /**
+         * Listening ended because speech cannot be recognised.
+         *
+         * @param error The [SpeechRecognizer] error the recogniser kept reporting, or
+         *   [NO_RECOGNIZER] if the device has no recognition service.
+         */
+        fun onVoiceUnavailable(error: Int)
     }
 
     companion object {
         private const val TAG = "VoiceInput"
+        /** Given to [Listener.onVoiceUnavailable] when the device has no recognition service. */
+        const val NO_RECOGNIZER = -1
         private const val RESTART_DELAY_MS = 150L
         /** Failed attempts to listen in a row after which listening ends. */
         private const val MAX_FAILURES = 4
@@ -93,14 +100,12 @@ class VoiceInput(private val context: Context, private val listener: Listener) {
      * @param language The language to recognise.
      */
     fun start(mode: VoiceMode, language: DasherLanguage) {
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
-            != PackageManager.PERMISSION_GRANTED
-        ) {
+        if (!mayRecord()) {
             listener.onVoicePermissionNeeded()
             return
         }
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            listener.onVoiceUnavailable()
+            listener.onVoiceUnavailable(NO_RECOGNIZER)
             return
         }
         this.language = language
@@ -126,6 +131,10 @@ class VoiceInput(private val context: Context, private val listener: Listener) {
         recognizer?.destroy()
         recognizer = null
     }
+
+    private fun mayRecord(): Boolean =
+        ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
 
     private fun listen() {
         val current = mode ?: return
@@ -173,15 +182,16 @@ class VoiceInput(private val context: Context, private val listener: Listener) {
             when (error) {
                 // Nothing was said, or nothing understood: keep listening.
                 SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> listenAgainSoon()
-                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
-                    stop()
-                    listener.onVoicePermissionNeeded()
-                }
                 else -> {
                     Log.w(TAG, "recognition error $error")
-                    if (++failures >= MAX_FAILURES) {
+                    if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS && !mayRecord()) {
                         stop()
-                        listener.onVoiceUnavailable()
+                        listener.onVoicePermissionNeeded()
+                    } else if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS || ++failures >= MAX_FAILURES) {
+                        // With the permission granted, the recogniser itself may not listen,
+                        // and asking the user again would not change that.
+                        stop()
+                        listener.onVoiceUnavailable(error)
                     } else {
                         listenAgainSoon()
                     }
@@ -202,3 +212,14 @@ class VoiceInput(private val context: Context, private val listener: Listener) {
         override fun onEvent(eventType: Int, params: Bundle?) = Unit
     }
 }
+
+/**
+ * What to tell the user when [VoiceInput.Listener.onVoiceUnavailable] is called.  The error
+ * number is the [SpeechRecognizer] one, which says why the recogniser did not listen.
+ */
+fun voiceUnavailableMessage(context: Context, error: Int): String =
+    if (error == VoiceInput.NO_RECOGNIZER) {
+        context.getString(R.string.voice_no_recognizer)
+    } else {
+        context.getString(R.string.voice_unavailable, error)
+    }

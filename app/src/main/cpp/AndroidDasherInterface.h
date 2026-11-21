@@ -267,6 +267,8 @@ private:
         int framesLeft = 0;
         /// Scrolls and zooms scheduled so far.
         int moves = 0;
+        /// Whether the move scheduled last was a scroll made ahead of a zoom.
+        bool scrolled = false;
         /// Moving back: whether the zoom out of the last symbol's box was scheduled.
         bool zoomedOut = false;
     };

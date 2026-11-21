@@ -3,6 +3,7 @@ package com.janmurin.dashermobile
 import android.content.ComponentCallbacks2
 import android.content.Context
 import android.inputmethodservice.InputMethodService
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.text.InputType
@@ -10,6 +11,7 @@ import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.LinearLayout
@@ -380,11 +382,15 @@ class DasherImeService : InputMethodService() {
             override fun onVoiceHeard(mode: VoiceMode, alternatives: List<String>, language: DasherLanguage) {
                 if (!isInputViewActive) return
                 when (mode) {
-                    VoiceMode.DICTATION -> insertDictation(localHost, alternatives.first())
-                    VoiceMode.LETTERS -> DasherSessionCoordinator.steer(
-                        localHost,
-                        SpokenLetters.parse(alternatives, language)
-                    )
+                    VoiceMode.DICTATION -> {
+                        views.voiceStatusView.text = alternatives.first()
+                        insertDictation(localHost, alternatives.first())
+                    }
+                    VoiceMode.LETTERS -> {
+                        val symbols = SpokenLetters.parse(alternatives, language)
+                        views.showSpokenLetters(alternatives.first(), symbols)
+                        DasherSessionCoordinator.steer(localHost, symbols)
+                    }
                 }
             }
 
@@ -392,8 +398,8 @@ class DasherImeService : InputMethodService() {
                 VoicePermissionActivity.open(this@DasherImeService)
             }
 
-            override fun onVoiceUnavailable() {
-                Toast.makeText(this@DasherImeService, R.string.voice_unavailable, Toast.LENGTH_SHORT).show()
+            override fun onVoiceUnavailable(error: Int) {
+                Toast.makeText(this@DasherImeService, voiceUnavailableMessage(this@DasherImeService, error), Toast.LENGTH_LONG).show()
             }
         })
         voiceInput = voice
@@ -401,12 +407,45 @@ class DasherImeService : InputMethodService() {
         fun toggle(mode: VoiceMode) {
             if (voice.mode == mode) {
                 voice.stop()
+            } else if (mode == VoiceMode.DICTATION && switchToVoiceTyping()) {
+                // The phone's own voice typing has taken over; it hands back when done.
+                voice.stop()
             } else {
                 voice.start(mode, VoiceInput.languageFor(languagesPrefSet()))
             }
         }
         views.dictationButton.setOnClickListener { toggle(VoiceMode.DICTATION) }
         views.lettersButton.setOnClickListener { toggle(VoiceMode.LETTERS) }
+    }
+
+    /**
+     * Hands over to the phone's voice typing, if it has one switched on: an input method with a
+     * voice subtype, such as Google voice typing.  That is how keyboards offer dictation; the
+     * voice input method returns to this keyboard when the user is done, and Dasher then
+     * continues behind the dictated text.
+     *
+     * @return `false` if there is no such input method, or the switch failed.
+     */
+    private fun switchToVoiceTyping(): Boolean {
+        val manager = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager ?: return false
+        for ((method, subtypes) in manager.shortcutInputMethodsAndSubtypes) {
+            if (method.packageName == packageName) continue
+            val subtype = subtypes.firstOrNull { it.mode == "voice" } ?: continue
+            return try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    switchInputMethod(method.id, subtype)
+                } else {
+                    val token = window?.window?.attributes?.token ?: return false
+                    @Suppress("DEPRECATION")
+                    manager.setInputMethodAndSubtype(token, method.id, subtype)
+                }
+                true
+            } catch (e: RuntimeException) {
+                Log.w(TAG, "cannot switch to ${method.id}", e)
+                false
+            }
+        }
+        return false
     }
 
     /**
