@@ -60,6 +60,32 @@ class DasherImeTextSink(
             .replace('\u201D', '"')
             .replace('\u201E', '"')
             .replace('\u201F', '"')
+
+        /**
+         * Returns `true` if the editor's text before its cursor is the text Dasher believes is
+         * there, so a cursor report needs no reload.
+         *
+         * @param editorText     Text read before the editor's cursor: up to [window] + 1
+         *   characters, so that it shows whether the editor holds more than [window].
+         * @param known          The text Dasher believes is before the cursor.
+         * @param window         Characters compared at most.
+         * @param knownIsPartial `true` if [known] is only the end of the editor's text, because
+         *   the text was loaded from a full window.  Otherwise [known] is all of it, and an
+         *   editor holding more than [window] characters matches only if [known] does too: the
+         *   end of a long text never matches a short or empty one Dasher started from.
+         */
+        fun textBeforeCursorMatches(
+            editorText: String,
+            known: String,
+            window: Int,
+            knownIsPartial: Boolean
+        ): Boolean {
+            val before = asTyped(editorText.takeLast(window))
+            val expected = known.takeLast(window)
+            if (knownIsPartial) return before.endsWith(expected, ignoreCase = true)
+            return before.equals(expected, ignoreCase = true) &&
+                (editorText.length > window) == (known.length > window)
+        }
     }
 
     /** What [onTextChanged] did. */

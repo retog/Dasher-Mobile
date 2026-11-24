@@ -522,18 +522,13 @@ class DasherImeService : InputMethodService() {
     }
 
     /** Returns `true` if the editor's text before its cursor is what Dasher believes it is. */
-    private fun textBeforeCursorMatches(sink: DasherImeTextSink): Boolean {
-        val raw = textBeforeCursor()
-        val before = DasherImeTextSink.asTyped(raw.takeLast(MAX_CONTEXT_CHARS))
-        val expected = (contextOutsideEngine + sink.committedText).takeLast(MAX_CONTEXT_CHARS)
-        // Dasher does not know the editor's text before the window it was loaded from.
-        val partial = loadedWindowWasFull || raw.length > MAX_CONTEXT_CHARS
-        return if (partial) {
-            before.endsWith(expected, ignoreCase = true)
-        } else {
-            before.equals(expected, ignoreCase = true)
-        }
-    }
+    private fun textBeforeCursorMatches(sink: DasherImeTextSink): Boolean =
+        DasherImeTextSink.textBeforeCursorMatches(
+            editorText = textBeforeCursor(),
+            known = contextOutsideEngine + sink.committedText,
+            window = MAX_CONTEXT_CHARS,
+            knownIsPartial = loadedWindowWasFull
+        )
 
     /**
      * Returns up to one character more than [MAX_CONTEXT_CHARS] before the cursor (or before a

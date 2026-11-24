@@ -179,4 +179,28 @@ class DasherImeTextSinkTest {
         assertEquals("a", editor.text.toString())
         assertEquals(0, editor.reads)
     }
+
+    @Test
+    fun theEndOfALongTextIsNotTheEmptyTextDasherStartedFrom() {
+        val long = "Ein Satz. ".repeat(30) + "Ende."
+        val read = long.takeLast(201)
+        // The cursor was at the start of the editor (nothing loaded) and was put at its end.
+        assertFalse(DasherImeTextSink.textBeforeCursorMatches(read, "", 200, knownIsPartial = false))
+        // Nor is it a short text that happens to be its end.
+        assertFalse(DasherImeTextSink.textBeforeCursorMatches(read, "Ende.", 200, knownIsPartial = false))
+        // It is the long text Dasher holds, ...
+        assertTrue(DasherImeTextSink.textBeforeCursorMatches(read, long, 200, knownIsPartial = false))
+        // ... or the end of the long text it was loaded from.
+        assertTrue(DasherImeTextSink.textBeforeCursorMatches(read, long.takeLast(200), 200, knownIsPartial = true))
+    }
+
+    @Test
+    fun aShortTextMatchesOnlyAsAWhole() {
+        assertTrue(DasherImeTextSink.textBeforeCursorMatches("Hallo du", "hallo du", 200, knownIsPartial = false))
+        assertFalse(DasherImeTextSink.textBeforeCursorMatches("Hallo du", "du", 200, knownIsPartial = false))
+        assertTrue(DasherImeTextSink.textBeforeCursorMatches("Hallo du", "du", 200, knownIsPartial = true))
+        assertFalse(DasherImeTextSink.textBeforeCursorMatches("Hallo du", "", 200, knownIsPartial = false))
+        assertTrue(DasherImeTextSink.textBeforeCursorMatches("", "", 200, knownIsPartial = false))
+        assertTrue(DasherImeTextSink.textBeforeCursorMatches("\u201EJa\u201C\u00A0", "\"Ja\" ", 200, knownIsPartial = false))
+    }
 }
