@@ -58,7 +58,9 @@ const Language kLanguages[] = {
      "training_slovak_SK.txt"},
 };
 
-const char *const kPunctuation[] = {",", ".", "?", "!", "'", "\"", "-", ":", ";", "(", ")"};
+/// Includes the ellipsis "…", which editors and other keyboards often make of "...": text up to
+/// the cursor is loaded only from after the last character the alphabet lacks.
+const char *const kPunctuation[] = {",", ".", "\xE2\x80\xA6", "?", "!", "'", "\"", "-", ":", ";", "(", ")"};
 
 constexpr char kUserTextPrefix[] = "user_text_";
 constexpr char kUserTextSuffix[] = ".txt";

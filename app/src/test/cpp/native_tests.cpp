@@ -100,6 +100,7 @@ void testLanguageSets() {
     CHECK(contains(english, "label=\"Z\""));
     CHECK(!contains(english, "ß"));
     CHECK(contains(english, "label=\"&quot;\""));
+    CHECK(contains(english, "label=\"\xE2\x80\xA6\""));   // "…"
     CHECK(contains(english, "trainingFilename=\"user_text_en.txt\""));
 
     const std::string mixed = AlphabetXml({"de", "sk"});
@@ -371,6 +372,16 @@ void testSession(const std::string &dir) {
         CHECK_EQ(dasher.GetOutputText(), std::string("Hal"));
         steer(dasher, timeMs, "lo du");
         CHECK_EQ(dasher.GetOutputText(), std::string("Hallo du"));
+
+        // Text ending in an ellipsis is loaded in full, and the ellipsis can be deleted.
+        CHECK_EQ(dasher.SetContext("Na\xE2\x80\xA6"), std::string("Na\xE2\x80\xA6"));
+        dasher.Frame(timeMs += 16);
+        dasher.TakeFrameStrings();
+        CHECK(dasher.SteerBack());
+        finishSteering(dasher, timeMs);
+        CHECK_EQ(dasher.GetOutputText(), std::string("Na"));
+        steer(dasher, timeMs, "\xE2\x80\xA6 ja");
+        CHECK_EQ(dasher.GetOutputText(), std::string("Na\xE2\x80\xA6 ja"));
 
         // Back to the very start of a text, and no further.
         dasher.ResetOutputText();
