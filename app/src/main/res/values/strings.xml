@@ -46,6 +46,10 @@
     <string name="icon_voice_dictation">Dictate</string>
     <string name="icon_voice_letters">Move by spoken letters</string>
     <string name="icon_delete">Delete</string>
+    <string name="icon_number_pad">Numbers</string>
+    <string name="number_pad_label" translatable="false">123</string>
+    <string name="number_pad_close">Back to Dasher</string>
+    <string name="number_pad_return">Return</string>
     <string name="voice_unavailable">Speech cannot be recognised on this device right now.</string>
     <string name="training_texts_hint">Dasher learns which letters follow which from a text in each language, and comes with one for each. You can add a text of your own to a language\'s: import a plain text file (UTF-8).</string>
     <string name="training_text_bundled">Included</string>
