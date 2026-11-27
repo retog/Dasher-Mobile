@@ -21,14 +21,15 @@ import java.text.DecimalFormatSymbols
  * much the same size would be slower to steer into than ten buttons are to tap.
  *
  * ```
- *  1   2   3   +   ⌫
- *  4   5   6   #   ,
- *  7   8   9   ␣   ␣
- * abc  0   0   0   ⏎
+ *  1   2   3   ⌫
+ *  4   5   6   ,
+ *  7   8   9   +
+ * abc  0   0   ⏎
  * ```
  *
- * The decimal separator is the one of the device's language, dot or comma; holding its button
- * enters the other one, shown small beside it.
+ * Two buttons enter a second character when held, shown small beside the first: the decimal
+ * separator, which is the one of the device's language, enters the other of dot and comma, and
+ * plus enters a hash.
  *
  * The pad only reports the buttons tapped; the host enters the text.
  */
@@ -36,14 +37,13 @@ class NumberPad(context: Context) : LinearLayout(context) {
 
     private companion object {
         const val BACKSPACE = "⌫"
-        const val SPACE = "␣"
         const val RETURN = "⏎"
         /** Holding backspace deletes again after this long, then at every interval. */
         const val REPEAT_DELAY_MS = 400L
         const val REPEAT_INTERVAL_MS = 70L
     }
 
-    /** Called with the text of a tapped digit, sign, separator or space button. */
+    /** Called with the text of a tapped digit, sign or separator button. */
     var onText: (String) -> Unit = {}
     /** Called when backspace is tapped, and repeatedly while it is held. */
     var onBackspace: () -> Unit = {}
@@ -67,15 +67,12 @@ class NumberPad(context: Context) : LinearLayout(context) {
         val gap = dp(3)
         setPadding(gap, gap, gap, gap)
 
-        addRow(key("1"), key("2"), key("3"), key("+"), backspaceKey())
-        addRow(key("4"), key("5"), key("6"), key("#"), separatorKey())
-        addRow(
-            key("7"),
-            key("8"),
-            key("9"),
-            key(SPACE, text = " ", weight = 2f, description = context.getString(R.string.number_pad_space))
-        )
-        addRow(closeKey(), key("0", weight = 3f), returnKey())
+        // The decimal separator of the device's language.
+        val separator = if (DecimalFormatSymbols.getInstance().decimalSeparator == ',') "," else "."
+        addRow(key("1"), key("2"), key("3"), backspaceKey())
+        addRow(key("4"), key("5"), key("6"), key(separator, held = if (separator == ",") "." else ","))
+        addRow(key("7"), key("8"), key("9"), key("+", held = "#"))
+        addRow(closeKey(), key("0", weight = 2f), returnKey())
     }
 
     override fun onVisibilityChanged(changedView: View, visibility: Int) {
@@ -112,31 +109,24 @@ class NumberPad(context: Context) : LinearLayout(context) {
             }
         }
 
-    private fun key(
-        label: String,
-        text: String = label,
-        weight: Float = 1f,
-        description: String? = null
-    ): TextView = button(label, weight, description).apply {
-        setOnClickListener { onText(text) }
-    }
-
-    /** The decimal separator of the device's language; held, the other of dot and comma. */
-    private fun separatorKey(): TextView {
-        val separator = if (DecimalFormatSymbols.getInstance().decimalSeparator == ',') "," else "."
-        val other = if (separator == ",") "." else ","
-        return key(separator).apply {
-            // The other separator, small and raised, after a thin space.
-            text = SpannableString("$separator\u2009$other").apply {
-                setSpan(RelativeSizeSpan(0.5f), 1, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                setSpan(SuperscriptSpan(), 1, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            }
-            setOnLongClickListener {
-                onText(other)
-                true
+    /**
+     * A button that enters [label] when tapped and, if given, [held] when held.
+     */
+    private fun key(label: String, weight: Float = 1f, held: String? = null): TextView =
+        button(label, weight, null).apply {
+            setOnClickListener { onText(label) }
+            if (held != null) {
+                // The held character, small and raised, after a thin space.
+                text = SpannableString("$label\u2009$held").apply {
+                    setSpan(RelativeSizeSpan(0.5f), label.length, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    setSpan(SuperscriptSpan(), label.length, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                setOnLongClickListener {
+                    onText(held)
+                    true
+                }
             }
         }
-    }
 
     private fun returnKey(): TextView =
         button(RETURN, 1f, context.getString(R.string.number_pad_return)).apply {
