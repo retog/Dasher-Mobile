@@ -1,6 +1,10 @@
 package com.janmurin.dashermobile.ui
 
 import android.content.Context
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.RelativeSizeSpan
+import android.text.style.SuperscriptSpan
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -8,6 +12,7 @@ import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.janmurin.dashermobile.R
+import java.text.DecimalFormatSymbols
 
 /**
  * A pad of large buttons for entering numbers, shown over the Dasher canvas in place of it.
@@ -16,11 +21,14 @@ import com.janmurin.dashermobile.R
  * much the same size would be slower to steer into than ten buttons are to tap.
  *
  * ```
- *  1   2   3   ⌫
- *  4   5   6   .
- *  7   8   9   ,
- * abc    0     ␣
+ *  1   2   3   +   ⌫
+ *  4   5   6   #   ,
+ *  7   8   9   ␣   ␣
+ * abc  0   0   0   ⏎
  * ```
+ *
+ * The decimal separator is the one of the device's language, dot or comma; holding its button
+ * enters the other one, shown small beside it.
  *
  * The pad only reports the buttons tapped; the host enters the text.
  */
@@ -29,15 +37,18 @@ class NumberPad(context: Context) : LinearLayout(context) {
     private companion object {
         const val BACKSPACE = "⌫"
         const val SPACE = "␣"
+        const val RETURN = "⏎"
         /** Holding backspace deletes again after this long, then at every interval. */
         const val REPEAT_DELAY_MS = 400L
         const val REPEAT_INTERVAL_MS = 70L
     }
 
-    /** Called with the text of a tapped digit, separator or space button. */
+    /** Called with the text of a tapped digit, sign, separator or space button. */
     var onText: (String) -> Unit = {}
     /** Called when backspace is tapped, and repeatedly while it is held. */
     var onBackspace: () -> Unit = {}
+    /** Called when return is tapped. */
+    var onReturn: () -> Unit = {}
     /** Called when the button that leads back to Dasher is tapped. */
     var onClose: () -> Unit = {}
 
@@ -56,14 +67,15 @@ class NumberPad(context: Context) : LinearLayout(context) {
         val gap = dp(3)
         setPadding(gap, gap, gap, gap)
 
-        addRow(key("1"), key("2"), key("3"), backspaceKey())
-        addRow(key("4"), key("5"), key("6"), key("."))
-        addRow(key("7"), key("8"), key("9"), key(","))
+        addRow(key("1"), key("2"), key("3"), key("+"), backspaceKey())
+        addRow(key("4"), key("5"), key("6"), key("#"), separatorKey())
         addRow(
-            closeKey(),
-            key("0", weight = 2f),
-            key(SPACE, text = " ", description = context.getString(R.string.number_pad_space))
+            key("7"),
+            key("8"),
+            key("9"),
+            key(SPACE, text = " ", weight = 2f, description = context.getString(R.string.number_pad_space))
         )
+        addRow(closeKey(), key("0", weight = 3f), returnKey())
     }
 
     override fun onVisibilityChanged(changedView: View, visibility: Int) {
@@ -108,6 +120,28 @@ class NumberPad(context: Context) : LinearLayout(context) {
     ): TextView = button(label, weight, description).apply {
         setOnClickListener { onText(text) }
     }
+
+    /** The decimal separator of the device's language; held, the other of dot and comma. */
+    private fun separatorKey(): TextView {
+        val separator = if (DecimalFormatSymbols.getInstance().decimalSeparator == ',') "," else "."
+        val other = if (separator == ",") "." else ","
+        return key(separator).apply {
+            // The other separator, small and raised, after a thin space.
+            text = SpannableString("$separator\u2009$other").apply {
+                setSpan(RelativeSizeSpan(0.5f), 1, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                setSpan(SuperscriptSpan(), 1, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            setOnLongClickListener {
+                onText(other)
+                true
+            }
+        }
+    }
+
+    private fun returnKey(): TextView =
+        button(RETURN, 1f, context.getString(R.string.number_pad_return)).apply {
+            setOnClickListener { onReturn() }
+        }
 
     private fun closeKey(): TextView =
         button("abc", 1f, context.getString(R.string.number_pad_close)).apply {

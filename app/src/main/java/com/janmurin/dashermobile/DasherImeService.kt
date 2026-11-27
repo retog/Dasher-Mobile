@@ -222,6 +222,7 @@ class DasherImeService : InputMethodService() {
         views.numberPad?.apply {
             onText = { text -> enterFromNumberPad(text) }
             onBackspace = { deleteFromNumberPad() }
+            onReturn = { returnFromNumberPad() }
             onClose = { showNumberPad(false) }
         }
 
@@ -476,6 +477,26 @@ class DasherImeService : InputMethodService() {
                     Character.isSurrogatePair(before[0], before[1])
                 inputConnection.deleteSurroundingText(if (isPair) 2 else 1, 0)
             }
+        }
+        loadTextBeforeCursor()
+    }
+
+    /**
+     * Does what the editor's return key does: its action ("Go", "Search", "Send", "Next") if it
+     * has one, else a new line.  Unlike a brush with Dasher's ¶ box, a tap on a button is meant.
+     */
+    private fun returnFromNumberPad() {
+        val inputConnection = currentInputConnection ?: return
+        val info = currentInputEditorInfo
+        hostHandle?.let { DasherSessionCoordinator.requestPause(it) }
+        val options = info?.imeOptions ?: 0
+        val action = options and EditorInfo.IME_MASK_ACTION
+        val hasAction = (options and EditorInfo.IME_FLAG_NO_ENTER_ACTION) == 0 &&
+            action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED
+        when {
+            hasAction -> inputConnection.performEditorAction(action)
+            imeTextSink?.acceptsNewlines == true -> inputConnection.commitText("\n", 1)
+            else -> sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
         }
         loadTextBeforeCursor()
     }
