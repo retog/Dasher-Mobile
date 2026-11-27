@@ -35,6 +35,10 @@ Both are tied to the languages that were chosen at the time, and are used whenev
 
 Nothing is learned in password fields or where an app asks keyboards not to learn. PPM is the language model that learns.
 
+## Numbers
+
+Dasher's alphabet has no digits. In the keyboard, the **123** button in the top left corner of the Dasher canvas, shown while Dasher is paused, opens a pad of large buttons instead: the ten digits, dot, comma, space and backspace (hold it to keep deleting). **abc** leads back to Dasher, which continues behind the number. The pad opens by itself in number and phone fields.
+
 ## Voice input
 
 Two buttons in the top right corner of the Dasher canvas, shown while Dasher is paused, switch a voice mode on and off:

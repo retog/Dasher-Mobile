@@ -50,6 +50,10 @@ import com.janmurin.dashermobile.VoiceMode
  *                                ([com.janmurin.dashermobile.VoiceMode.DICTATION]).
  * @property lettersButton        Button overlaid on the canvas that switches moving by spoken
  *                                letters on and off ([com.janmurin.dashermobile.VoiceMode.LETTERS]).
+ * @property numberPadButton      Button overlaid on the canvas that opens [numberPad]; `null`
+ *                                outside IME mode.
+ * @property numberPad            Pad of digit buttons that covers the canvas while shown; `null`
+ *                                outside IME mode.
  * @property keyboardBanner       Hidden banner below the top bar, for setting up Dasher as the
  *                                system keyboard; `null` outside APP mode.
  */
@@ -67,6 +71,8 @@ data class DasherHostViews(
     val locateButton: ImageView?,
     val dictationButton: ImageView,
     val lettersButton: ImageView,
+    val numberPadButton: TextView?,
+    val numberPad: NumberPad?,
     val keyboardBanner: TextView?
 ) {
     /**
@@ -305,6 +311,42 @@ object DasherHostUi {
         val dictationButton = voiceButton(R.drawable.mic_24px, R.string.icon_voice_dictation, 0)
         val lettersButton = voiceButton(R.drawable.mic_letters_24px, R.string.icon_voice_letters, 1)
 
+        // Numbers are entered at the editor's cursor, which only the keyboard has.
+        var numberPadButton: TextView? = null
+        var numberPad: NumberPad? = null
+        if (hostMode == HostMode.IME) {
+            numberPadButton = TextView(context).apply {
+                text = context.getString(R.string.number_pad_label)
+                textSize = 14f
+                gravity = Gravity.CENTER
+                setTextColor(0xFFFFFFFF.toInt())
+                background = ResourcesCompat.getDrawable(context.resources, R.drawable.button_background, null)
+                contentDescription = context.getString(R.string.icon_number_pad)
+                layoutParams = FrameLayout.LayoutParams(dp(44), dp(44)).apply {
+                    gravity = Gravity.TOP or Gravity.START
+                    val margin = dp(12)
+                    // Below the locate button.
+                    topMargin = margin + dp(52)
+                    leftMargin = margin
+                }
+                isClickable = true
+                isFocusable = true
+                visibility = View.GONE
+            }.also(canvasFrame::addView)
+
+            // Added last, so that it covers the canvas and the buttons on it.
+            numberPad = NumberPad(context).apply {
+                visibility = View.GONE
+            }
+            canvasFrame.addView(
+                numberPad,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            )
+        }
+
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFF000000.toInt())
@@ -457,6 +499,8 @@ object DasherHostUi {
             locateButton = locateButton,
             dictationButton = dictationButton,
             lettersButton = lettersButton,
+            numberPadButton = numberPadButton,
+            numberPad = numberPad,
             keyboardBanner = keyboardBanner
         )
     }

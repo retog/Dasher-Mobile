@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.text.InputType
 import android.util.Log
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
@@ -42,6 +43,8 @@ import com.janmurin.dashermobile.ui.DasherHostViews
  * - Continues at the editor's cursor as if the text before it had been written with Dasher:
  *   on start, after the user moves the cursor or selects text, and from the locate button on
  *   the canvas.
+ * - Enters numbers from a pad of digit buttons, which Dasher's alphabet lacks; the pad opens
+ *   by itself in number and phone fields.
  * - Manages the [TiltInputProvider] sensor registration in sync with visibility and mode.
  * - Persists and restores language, language-model and input-mode preferences via [DasherPrefs].
  */
@@ -147,6 +150,7 @@ class DasherImeService : InputMethodService() {
                 views.statusView.text = "$modeLabel | $stateLabel"
                 views.languageModelSpinner?.isEnabled = paused
                 views.locateButton?.visibility = if (paused) View.VISIBLE else View.GONE
+                views.numberPadButton?.visibility = if (paused) View.VISIBLE else View.GONE
                 val showCanvasCalibrateButton = paused && mode == InputMode.TILT
                 views.canvasCalibrateButton.visibility = if (showCanvasCalibrateButton) View.VISIBLE else View.GONE
                 views.canvasCalibrateButton.isEnabled = showCanvasCalibrateButton
@@ -214,6 +218,13 @@ class DasherImeService : InputMethodService() {
             DasherSessionCoordinator.unpause(localHost)
         }
 
+        views.numberPadButton?.setOnClickListener { showNumberPad(true) }
+        views.numberPad?.apply {
+            onText = { text -> enterFromNumberPad(text) }
+            onBackspace = { deleteFromNumberPad() }
+            onClose = { showNumberPad(false) }
+        }
+
         setupVoiceControls(views, localHost)
         setupLanguageModelControls(views, localHost)
         applyImeStartupState(localHost)
@@ -254,6 +265,7 @@ class DasherImeService : InputMethodService() {
         hostViews?.outputView?.text = ""
         DasherSessionCoordinator.resetOutputText(localHost)
         loadTextBeforeCursor()
+        showNumberPad(takesNumbers(info))
         
         if (DasherSessionCoordinator.getInputMode() == InputMode.TILT && !DasherSessionCoordinator.isPaused()) {
             tiltProvider?.register()
@@ -425,6 +437,55 @@ class DasherImeService : InputMethodService() {
         }
         loadTextBeforeCursor()
     }
+
+    /**
+     * Shows the number pad over the canvas, or the canvas again.  Dasher stays paused under the
+     * pad, and no voice mode stays on, as its buttons are covered.
+     */
+    private fun showNumberPad(show: Boolean) {
+        val pad = hostViews?.numberPad ?: return
+        if (show) {
+            hostHandle?.let { DasherSessionCoordinator.requestPause(it) }
+            voiceInput?.stop()
+        }
+        pad.visibility = if (show) View.VISIBLE else View.GONE
+    }
+
+    /** Enters a digit or separator at the cursor, and has Dasher continue behind it. */
+    private fun enterFromNumberPad(text: String) {
+        val inputConnection = currentInputConnection ?: return
+        hostHandle?.let { DasherSessionCoordinator.requestPause(it) }
+        inputConnection.commitText(text, 1)
+        loadTextBeforeCursor()
+    }
+
+    /** Deletes the selected text, or else the character before the cursor, whoever wrote it. */
+    private fun deleteFromNumberPad() {
+        val inputConnection = currentInputConnection ?: return
+        val info = currentInputEditorInfo
+        hostHandle?.let { DasherSessionCoordinator.requestPause(it) }
+        when {
+            // Editors that hold no text (terminals) take key presses only.
+            info != null && (info.inputType and InputType.TYPE_MASK_CLASS) == InputType.TYPE_NULL ->
+                sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL)
+            selectionStart >= 0 && selectionStart != selectionEnd -> inputConnection.commitText("", 1)
+            else -> {
+                // A character outside the basic plane (an emoji) takes two chars.
+                val before = if (mayCheckText(info)) inputConnection.getTextBeforeCursor(2, 0) else null
+                val isPair = before != null && before.length == 2 &&
+                    Character.isSurrogatePair(before[0], before[1])
+                inputConnection.deleteSurroundingText(if (isPair) 2 else 1, 0)
+            }
+        }
+        loadTextBeforeCursor()
+    }
+
+    /** Returns `true` for editors that take numbers only: number and phone fields. */
+    private fun takesNumbers(info: EditorInfo?): Boolean =
+        when ((info?.inputType ?: 0) and InputType.TYPE_MASK_CLASS) {
+            InputType.TYPE_CLASS_NUMBER, InputType.TYPE_CLASS_PHONE -> true
+            else -> false
+        }
 
     private fun setupLanguageModelControls(views: DasherHostViews, localHost: DasherSessionCoordinator.HostHandle) {
         val models = LanguageModel.selectable
