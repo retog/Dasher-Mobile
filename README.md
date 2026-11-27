@@ -37,7 +37,7 @@ Nothing is learned in password fields or where an app asks keyboards not to lear
 
 ## Numbers
 
-Dasher's alphabet has no digits. In the keyboard, the **123** button in the top left corner of the Dasher canvas, shown while Dasher is paused, opens a pad of large buttons instead: the ten digits, the decimal separator of the device's language (hold it for the other of dot and comma), plus (hold it for a hash), return and backspace (hold it to keep deleting). **abc** leads back to Dasher, which continues behind the number. The pad opens by itself in number and phone fields.
+Dasher's alphabet has no digits. In the keyboard, the **123** button in the top left corner of the Dasher canvas, shown while Dasher is paused, opens a pad of large buttons instead: the ten digits, the decimal separator of the device's language (hold it for the other of dot and comma), plus (hold it for a minus), hash, return and backspace (hold it to keep deleting). **abc** leads back to Dasher, which continues behind the number. The pad opens by itself in number and phone fields.
 
 ## Voice input
 

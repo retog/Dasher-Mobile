@@ -24,12 +24,12 @@ import java.text.DecimalFormatSymbols
  *  1   2   3   ⌫
  *  4   5   6   ,
  *  7   8   9   +
- * abc  0   0   ⏎
+ * abc  0   #   ⏎
  * ```
  *
  * Two buttons enter a second character when held, shown small beside the first: the decimal
  * separator, which is the one of the device's language, enters the other of dot and comma, and
- * plus enters a hash.
+ * plus enters a minus.
  *
  * The pad only reports the buttons tapped; the host enters the text.
  */
@@ -71,8 +71,8 @@ class NumberPad(context: Context) : LinearLayout(context) {
         val separator = if (DecimalFormatSymbols.getInstance().decimalSeparator == ',') "," else "."
         addRow(key("1"), key("2"), key("3"), backspaceKey())
         addRow(key("4"), key("5"), key("6"), key(separator, held = if (separator == ",") "." else ","))
-        addRow(key("7"), key("8"), key("9"), key("+", held = "#"))
-        addRow(closeKey(), key("0", weight = 2f), returnKey())
+        addRow(key("7"), key("8"), key("9"), key("+", held = "-"))
+        addRow(closeKey(), key("0"), key("#"), returnKey())
     }
 
     override fun onVisibilityChanged(changedView: View, visibility: Int) {
